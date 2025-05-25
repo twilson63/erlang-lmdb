@@ -37,15 +37,21 @@ brew install erlang
 
 ### Building
 
+With GNU `make`:
 ```bash
 git clone https://github.com/twilson63/erlang-lmdb.git
-cd lmdb_nif
 make
 ```
 
-Or with rebar3:
+Or with `rebar3`:
 ```bash
+git clone https://github.com/twilson63/erlang-lmdb.git
 rebar3 compile
+```
+
+Validate the build:
+```bash
+rebar3 eunit
 ```
 
 ### Basic Usage
@@ -118,7 +124,7 @@ ok = lmdb:env_close(Env).
 ### Custom Database Names
 
 ```erlang
-{ok, Result} = lmdb:with_txn(Env, fun(Txn) ->
+    {ok, Result} = lmdb:with_txn(Env, fun(Txn) ->
     {ok, UsersDbi} = lmdb:open_db(Txn, "users", ?MDB_CREATE),
     {ok, ProductsDbi} = lmdb:open_db(Txn, "products", ?MDB_CREATE),
     

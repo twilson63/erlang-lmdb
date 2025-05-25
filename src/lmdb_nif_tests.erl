@@ -1,9 +1,7 @@
-%% @doc Unit tests for LMDB NIF
+%%% @doc Unit tests for LMDB NIF
 -module(lmdb_nif_tests).
-
 -include_lib("eunit/include/eunit.hrl").
 -include("lmdb.hrl").
-
 -define(TEST_DB_PATH, "test_lmdb").
 
 %% Test fixtures
@@ -206,6 +204,3 @@ test_error_handling() ->
     ?assertEqual(duplicate_error_caught, Result),
     
     ok = lmdb:env_close(Env).
-
-%% Helper function to run a single test - removed as it's not needed
-%% Individual tests can be run directly

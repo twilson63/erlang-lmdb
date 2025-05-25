@@ -2,8 +2,10 @@
 
 LMDB_VERSION = 0.9.31
 LMDB_URL = https://github.com/LMDB/lmdb/archive/LMDB_$(LMDB_VERSION).tar.gz
-LMDB_DIR = lmdb-LMDB_$(LMDB_VERSION)
-LMDB_LIB_DIR = $(LMDB_DIR)/libraries/liblmdb
+LMDB_BASE_DIR = lmdb
+LMDB_ARCHIVE = $(LMDB_BASE_DIR)/LMDB_$(LMDB_VERSION).tar.gz
+LMDB_EXTRACTED_DIR = $(LMDB_BASE_DIR)/lmdb-LMDB_$(LMDB_VERSION)
+LMDB_LIB_DIR = $(LMDB_EXTRACTED_DIR)/libraries/liblmdb
 
 # Erlang/OTP paths
 ERL_EI_INCLUDE_DIR ?= $(shell erl -eval 'io:format("~s", [code:lib_dir(erl_interface, include)]), halt().' -noshell)
@@ -69,21 +71,43 @@ LMDB_LIB = $(LMDB_LIB_DIR)/liblmdb.a
 ERL_SOURCES = $(wildcard src/*.erl)
 BEAM_FILES = $(patsubst src/%.erl,$(EBIN_DIR)/%.beam,$(ERL_SOURCES))
 
+.PHONY: all
+
+all: deps
+
+deps: $(LMDB_LIB)
+
+compile: $(NIF_SO) $(BEAM_FILES)
+
+# Target for rebar3 - only builds NIF, lets rebar3 handle Erlang compilation
+compile-nif: $(NIF_SO)
+
 # Debug target to check LMDB status
 debug-lmdb:
 	@echo "=== LMDB Debug Information ==="
 	@echo "LMDB_VERSION: $(LMDB_VERSION)"
-	@echo "LMDB_DIR: $(LMDB_DIR)"
+	@echo "LMDB_BASE_DIR: $(LMDB_BASE_DIR)"
+	@echo "LMDB_ARCHIVE: $(LMDB_ARCHIVE)"
+	@echo "LMDB_EXTRACTED_DIR: $(LMDB_EXTRACTED_DIR)"
 	@echo "LMDB_LIB_DIR: $(LMDB_LIB_DIR)"
 	@echo "LMDB_LIB: $(LMDB_LIB)"
 	@echo ""
-	@echo "Checking if LMDB directory exists..."
-	@if [ -d "$(LMDB_DIR)" ]; then \
-		echo "✓ LMDB directory exists: $(LMDB_DIR)"; \
+	@echo "Checking if LMDB base directory exists..."
+	@if [ -d "$(LMDB_BASE_DIR)" ]; then \
+		echo "✓ LMDB base directory exists: $(LMDB_BASE_DIR)"; \
 		echo "Contents:"; \
-		ls -la $(LMDB_DIR)/ | head -10; \
+		ls -la $(LMDB_BASE_DIR)/ | head -10; \
 	else \
-		echo "✗ LMDB directory not found: $(LMDB_DIR)"; \
+		echo "✗ LMDB base directory not found: $(LMDB_BASE_DIR)"; \
+	fi
+	@echo ""
+	@echo "Checking if LMDB extracted directory exists..."
+	@if [ -d "$(LMDB_EXTRACTED_DIR)" ]; then \
+		echo "✓ LMDB extracted directory exists: $(LMDB_EXTRACTED_DIR)"; \
+		echo "Contents:"; \
+		ls -la $(LMDB_EXTRACTED_DIR)/ | head -10; \
+	else \
+		echo "✗ LMDB extracted directory not found: $(LMDB_EXTRACTED_DIR)"; \
 	fi
 	@echo ""
 	@echo "Checking if LMDB lib directory exists..."
@@ -101,17 +125,10 @@ debug-lmdb:
 	@echo "Looking for liblmdb.a files..."
 	@find . -name "liblmdb.a" 2>/dev/null || echo "No liblmdb.a files found"
 
-.PHONY: all clean deps compile test debug-lmdb rebuild
-
-all: deps compile
-
-deps: $(LMDB_LIB)
-
-compile: $(NIF_SO) $(BEAM_FILES)
-
 # Download and build LMDB
-$(LMDB_DIR).tar.gz:
+$(LMDB_ARCHIVE):
 	@echo "Downloading LMDB $(LMDB_VERSION)..."
+	@mkdir -p $(LMDB_BASE_DIR)
 	@if command -v curl >/dev/null 2>&1; then \
 		curl -L -o $@ $(LMDB_URL); \
 	elif command -v wget >/dev/null 2>&1; then \
@@ -121,12 +138,12 @@ $(LMDB_DIR).tar.gz:
 		exit 1; \
 	fi
 
-$(LMDB_DIR): $(LMDB_DIR).tar.gz
+$(LMDB_EXTRACTED_DIR): $(LMDB_ARCHIVE)
 	@echo "Extracting LMDB..."
-	tar -xzf $<
-	touch $@
+	@cd $(LMDB_BASE_DIR) && tar -xzf $(notdir $(LMDB_ARCHIVE))
+	@touch $@
 
-$(LMDB_LIB): $(LMDB_DIR)
+$(LMDB_LIB): $(LMDB_EXTRACTED_DIR)
 	@echo "Building LMDB for $(UNAME_SYS) $(UNAME_ARCH)..."
 	@echo "LMDB lib directory: $(LMDB_LIB_DIR)"
 	@echo "Building in: $(pwd)/$(LMDB_LIB_DIR)"
@@ -148,7 +165,7 @@ $(LMDB_LIB): $(LMDB_DIR)
 		echo "✓ LMDB header found: $(LMDB_LIB_DIR)/lmdb.h"; \
 	else \
 		echo "✗ LMDB header not found at: $(LMDB_LIB_DIR)/lmdb.h"; \
-		find $(LMDB_DIR) -name "lmdb.h" || true; \
+		find $(LMDB_EXTRACTED_DIR) -name "lmdb.h" || true; \
 		exit 1; \
 	fi
 
@@ -172,8 +189,9 @@ test: compile
 
 # Clean target
 clean:
+	rm -rf c_src/*.o c_src/*.d _build test
 	rm -rf $(PRIV_DIR) $(EBIN_DIR)
-	rm -rf $(LMDB_DIR) $(LMDB_DIR).tar.gz
+	rm -rf $(LMDB_BASE_DIR)
 
 # Development helpers
 shell: compile
