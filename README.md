@@ -38,7 +38,7 @@ brew install erlang
 ### Building
 
 ```bash
-git clone https://github.com/yourorg/lmdb_nif.git
+git clone https://github.com/twilson63/lmdb_nif.git
 cd lmdb_nif
 make
 ```
