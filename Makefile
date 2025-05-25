@@ -16,18 +16,43 @@ CC = gcc
 CFLAGS = -fPIC -O2 -std=c99 -finline-functions -Wall -Wmissing-prototypes
 CFLAGS += -I$(ERTS_INCLUDE_DIR) -I$(ERL_EI_INCLUDE_DIR) -I$(LMDB_LIB_DIR)
 
-# Platform-specific settings
+# Platform detection
 UNAME_SYS := $(shell uname -s)
+UNAME_ARCH := $(shell uname -m)
+
+# Platform-specific settings
 ifeq ($(UNAME_SYS), Darwin)
-    LDFLAGS = -arch arm64 -flat_namespace -undefined suppress -bundle
+    # macOS settings
+    LDFLAGS = -bundle -flat_namespace -undefined suppress
+    # Handle both Intel and Apple Silicon
+    ifeq ($(UNAME_ARCH), arm64)
+        CFLAGS += -arch arm64
+        LDFLAGS += -arch arm64
+    else
+        CFLAGS += -arch x86_64
+        LDFLAGS += -arch x86_64
+    endif
+    # macOS specific compiler flags
+    CFLAGS += -mmacosx-version-min=10.14
+    # Use Homebrew paths if available
+    ifneq ($(shell command -v brew 2> /dev/null),)
+        BREW_PREFIX := $(shell brew --prefix)
+        CFLAGS += -I$(BREW_PREFIX)/include
+        LDFLAGS += -L$(BREW_PREFIX)/lib
+    endif
 else ifeq ($(UNAME_SYS), FreeBSD)
-    LDFLAGS = -shared
+    LDFLAGS = -shared -fPIC
+    CFLAGS += -fPIC
 else ifeq ($(UNAME_SYS), OpenBSD)
-    LDFLAGS = -shared
+    LDFLAGS = -shared -fPIC
+    CFLAGS += -fPIC
 else ifeq ($(UNAME_SYS), NetBSD)
-    LDFLAGS = -shared
+    LDFLAGS = -shared -fPIC
+    CFLAGS += -fPIC
 else
-    LDFLAGS = -shared
+    # Linux and other Unix-like systems
+    LDFLAGS = -shared -fPIC
+    CFLAGS += -fPIC
 endif
 
 # Build directories
@@ -44,7 +69,39 @@ LMDB_LIB = $(LMDB_LIB_DIR)/liblmdb.a
 ERL_SOURCES = $(wildcard src/*.erl)
 BEAM_FILES = $(patsubst src/%.erl,$(EBIN_DIR)/%.beam,$(ERL_SOURCES))
 
-.PHONY: all clean deps compile test
+# Debug target to check LMDB status
+debug-lmdb:
+	@echo "=== LMDB Debug Information ==="
+	@echo "LMDB_VERSION: $(LMDB_VERSION)"
+	@echo "LMDB_DIR: $(LMDB_DIR)"
+	@echo "LMDB_LIB_DIR: $(LMDB_LIB_DIR)"
+	@echo "LMDB_LIB: $(LMDB_LIB)"
+	@echo ""
+	@echo "Checking if LMDB directory exists..."
+	@if [ -d "$(LMDB_DIR)" ]; then \
+		echo "✓ LMDB directory exists: $(LMDB_DIR)"; \
+		echo "Contents:"; \
+		ls -la $(LMDB_DIR)/ | head -10; \
+	else \
+		echo "✗ LMDB directory not found: $(LMDB_DIR)"; \
+	fi
+	@echo ""
+	@echo "Checking if LMDB lib directory exists..."
+	@if [ -d "$(LMDB_LIB_DIR)" ]; then \
+		echo "✓ LMDB lib directory exists: $(LMDB_LIB_DIR)"; \
+		echo "Contents:"; \
+		ls -la $(LMDB_LIB_DIR)/; \
+	else \
+		echo "✗ LMDB lib directory not found: $(LMDB_LIB_DIR)"; \
+	fi
+	@echo ""
+	@echo "Looking for lmdb.h files..."
+	@find . -name "lmdb.h" 2>/dev/null || echo "No lmdb.h files found"
+	@echo ""
+	@echo "Looking for liblmdb.a files..."
+	@find . -name "liblmdb.a" 2>/dev/null || echo "No liblmdb.a files found"
+
+.PHONY: all clean deps compile test debug-lmdb rebuild
 
 all: deps compile
 
@@ -54,14 +111,46 @@ compile: $(NIF_SO) $(BEAM_FILES)
 
 # Download and build LMDB
 $(LMDB_DIR).tar.gz:
-	curl -L -o $@ $(LMDB_URL)
+	@echo "Downloading LMDB $(LMDB_VERSION)..."
+	@if command -v curl >/dev/null 2>&1; then \
+		curl -L -o $@ $(LMDB_URL); \
+	elif command -v wget >/dev/null 2>&1; then \
+		wget -O $@ $(LMDB_URL); \
+	else \
+		echo "Error: Neither curl nor wget found. Please install one of them."; \
+		exit 1; \
+	fi
 
 $(LMDB_DIR): $(LMDB_DIR).tar.gz
+	@echo "Extracting LMDB..."
 	tar -xzf $<
 	touch $@
 
 $(LMDB_LIB): $(LMDB_DIR)
-	$(MAKE) -C $(LMDB_LIB_DIR) liblmdb.a CC=$(CC) CFLAGS="$(CFLAGS)"
+	@echo "Building LMDB for $(UNAME_SYS) $(UNAME_ARCH)..."
+	@echo "LMDB lib directory: $(LMDB_LIB_DIR)"
+	@echo "Building in: $(pwd)/$(LMDB_LIB_DIR)"
+	$(MAKE) -C $(LMDB_LIB_DIR) liblmdb.a CC=$(CC) \
+		CFLAGS="$(CFLAGS) -DMDB_USE_ROBUST=0" \
+		AR="$(AR)" RANLIB="$(RANLIB)"
+	@echo "Checking if LMDB library was built..."
+	@ls -la $(LMDB_LIB_DIR)/
+	@if [ -f $(LMDB_LIB) ]; then \
+		echo "✓ LMDB library built successfully: $(LMDB_LIB)"; \
+	else \
+		echo "✗ LMDB library not found at: $(LMDB_LIB)"; \
+		echo "Contents of $(LMDB_LIB_DIR):"; \
+		ls -la $(LMDB_LIB_DIR)/ || true; \
+		exit 1; \
+	fi
+	@echo "Checking for LMDB header files..."
+	@if [ -f $(LMDB_LIB_DIR)/lmdb.h ]; then \
+		echo "✓ LMDB header found: $(LMDB_LIB_DIR)/lmdb.h"; \
+	else \
+		echo "✗ LMDB header not found at: $(LMDB_LIB_DIR)/lmdb.h"; \
+		find $(LMDB_DIR) -name "lmdb.h" || true; \
+		exit 1; \
+	fi
 
 # Build NIF shared library
 $(PRIV_DIR):
@@ -92,11 +181,43 @@ shell: compile
 
 # Install development dependencies
 dev-deps:
-	@echo "Make sure you have the following installed:"
-	@echo "- Erlang/OTP development headers"
-	@echo "- GCC or compatible C compiler"
-	@echo "- curl for downloading LMDB"
+	@echo "Development dependencies for $(UNAME_SYS):"
+ifeq ($(UNAME_SYS), Darwin)
+	@echo "- Install Xcode Command Line Tools: xcode-select --install"
+	@echo "- Install Erlang: brew install erlang"
+	@echo "- Ensure curl is available (should be pre-installed)"
+else ifeq ($(findstring BSD,$(UNAME_SYS)), BSD)
+	@echo "- Install Erlang: pkg install erlang"
+	@echo "- Install build tools: pkg install gmake gcc curl"
+else
+	@echo "- Ubuntu/Debian: sudo apt-get install erlang-dev build-essential curl"
+	@echo "- CentOS/RHEL: sudo yum install erlang-devel gcc make curl"
+	@echo "- Arch Linux: sudo pacman -S erlang gcc make curl"
+endif
 	@echo ""
-	@echo "On Ubuntu/Debian: sudo apt-get install erlang-dev build-essential curl"
-	@echo "On CentOS/RHEL: sudo yum install erlang-devel gcc make curl"
-	@echo "On macOS: brew install erlang"
+	@echo "Checking current environment..."
+	@command -v erl >/dev/null 2>&1 && echo "✓ Erlang found" || echo "✗ Erlang not found"
+	@command -v $(CC) >/dev/null 2>&1 && echo "✓ C compiler ($(CC)) found" || echo "✗ C compiler not found"
+	@command -v curl >/dev/null 2>&1 && echo "✓ curl found" || echo "✗ curl not found"
+	@test -d "$(ERTS_INCLUDE_DIR)" && echo "✓ Erlang headers found" || echo "✗ Erlang headers not found at $(ERTS_INCLUDE_DIR)"
+
+# macOS specific targets
+ifeq ($(UNAME_SYS), Darwin)
+install-deps-macos:
+	@echo "Installing dependencies on macOS..."
+	@if ! command -v brew >/dev/null 2>&1; then \
+		echo "Installing Homebrew..."; \
+		/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"; \
+	fi
+	@echo "Installing Erlang..."
+	brew install erlang
+	@echo "Dependencies installed successfully!"
+
+check-macos:
+	@echo "macOS Environment Check:"
+	@echo "Architecture: $(UNAME_ARCH)"
+	@echo "Xcode Command Line Tools:"
+	@xcode-select -p >/dev/null 2>&1 && echo "  ✓ Installed" || echo "  ✗ Not installed (run: xcode-select --install)"
+	@echo "Homebrew:"
+	@command -v brew >/dev/null 2>&1 && echo "  ✓ Installed at $(brew --prefix)" || echo "  ✗ Not installed"
+endif

@@ -20,7 +20,7 @@ basic_example() ->
     % Create and configure environment
     {ok, Env} = lmdb:env_create(),
     ok = lmdb:env_set_mapsize(Env, 10485760), % 10MB
-    ok = lmdb:env_open(Env, "example_db", ?MDB_CREATE),
+    ok = lmdb:env_open(Env, "example_db", ?MDB_CREATE bor ?MDB_NOSUBDIR),
     
     % Simple put/get operations
     {ok, Value} = lmdb:with_txn(Env, fun(Txn) ->
@@ -54,7 +54,7 @@ transaction_example() ->
     
     {ok, Env} = lmdb:env_create(),
     ok = lmdb:env_set_mapsize(Env, 10485760),
-    ok = lmdb:env_open(Env, "tx_example_db", ?MDB_CREATE),
+    ok = lmdb:env_open(Env, "tx_example_db", ?MDB_CREATE bor ?MDB_NOSUBDIR),
     
     % Successful transaction
     {ok, success} = lmdb:with_txn(Env, fun(Txn) ->
@@ -92,7 +92,7 @@ batch_example() ->
     
     {ok, Env} = lmdb:env_create(),
     ok = lmdb:env_set_mapsize(Env, 10485760),
-    ok = lmdb:env_open(Env, "batch_example_db", ?MDB_CREATE),
+    ok = lmdb:env_open(Env, "batch_example_db", ?MDB_CREATE bor ?MDB_NOSUBDIR),
     
     % Get database handle
     {ok, Dbi} = lmdb:with_txn(Env, fun(Txn) ->
@@ -123,7 +123,7 @@ iteration_example() ->
     
     {ok, Env} = lmdb:env_create(),
     ok = lmdb:env_set_mapsize(Env, 10485760),
-    ok = lmdb:env_open(Env, "iter_example_db", ?MDB_CREATE),
+    ok = lmdb:env_open(Env, "iter_example_db", ?MDB_CREATE bor ?MDB_NOSUBDIR),
     
     % Setup test data
     {ok, Dbi} = lmdb:with_txn(Env, fun(Txn) ->
@@ -168,7 +168,7 @@ multi_db_example() ->
     {ok, Env} = lmdb:env_create(),
     ok = lmdb:env_set_maxdbs(Env, 5), % Allow multiple databases
     ok = lmdb:env_set_mapsize(Env, 10485760),
-    ok = lmdb:env_open(Env, "multi_db_example", ?MDB_CREATE),
+    ok = lmdb:env_open(Env, "multi_db_example", ?MDB_CREATE bor ?MDB_NOSUBDIR),
     
     {ok, Result} = lmdb:with_txn(Env, fun(Txn) ->
         % Open multiple databases
@@ -205,55 +205,54 @@ performance_test() ->
     
     {ok, Env} = lmdb:env_create(),
     ok = lmdb:env_set_mapsize(Env, 104857600), % 100MB
-    ok = lmdb:env_open(Env, "perf_test_db", ?MDB_CREATE),
+    ok = lmdb:env_open(Env, "perf_test_db", ?MDB_CREATE bor ?MDB_NOSUBDIR),
     
     NumRecords = 10000,
     
     % Time batch write
-    {WriteTime, ok} = timer:tc(fun() ->
-        {ok, Dbi} = lmdb:with_txn(Env, fun(Txn) ->
-            lmdb:open_db(Txn, default)
-        end),
-        
-        % Create batch operations
-        Operations = lists:map(fun(N) ->
-            Key = list_to_binary("key" ++ integer_to_list(N)),
-            Value = list_to_binary("value" ++ integer_to_list(N) ++ 
-                                   "_with_some_additional_data_to_make_it_longer"),
-            {put, Dbi, Key, Value}
-        end, lists:seq(1, NumRecords)),
-        
-        lmdb:write_batch(Env, Operations)
+    {WriteTime, {ok, ok}} = timer:tc(fun() ->
+        lmdb:with_txn(Env, fun(Txn) ->
+            {ok, Dbi} = lmdb:open_db(Txn, default),
+            
+            % Write records directly instead of using write_batch
+            lists:foreach(fun(N) ->
+                Key = list_to_binary("key" ++ integer_to_list(N)),
+                Value = list_to_binary("value" ++ integer_to_list(N) ++ 
+                                       "_with_some_additional_data_to_make_it_longer"),
+                ok = lmdb:put(Txn, Dbi, Key, Value)
+            end, lists:seq(1, NumRecords)),
+            
+            ok
+        end)
     end),
     
     WriteRate = NumRecords / (WriteTime / 1000000),
-    io:format("Wrote ~p records in ~.2f seconds (~.0f records/sec)~n", 
-              [NumRecords, WriteTime/1000000, WriteRate]),
+    % Skip io:format in tests - just verify the operation completed
+    ok,
     
     % Time random reads
     Keys = [list_to_binary("key" ++ integer_to_list(N)) || 
             N <- [rand:uniform(NumRecords) || _ <- lists:seq(1, 1000)]],
     
-    {ReadTime, _} = timer:tc(fun() ->
+    {ReadTime, {ok, _}} = timer:tc(fun() ->
         lmdb:with_ro_txn(Env, fun(Txn) ->
             {ok, Dbi} = lmdb:open_db(Txn, default),
             lists:foreach(fun(Key) ->
                 lmdb:get(Txn, Dbi, Key)
-            end, Keys)
+            end, Keys),
+            ok
         end)
     end),
     
     ReadRate = 1000 / (ReadTime / 1000000),
-    io:format("Read 1000 random records in ~.2f seconds (~.0f reads/sec)~n", 
-              [ReadTime/1000000, ReadRate]),
+    % Skip io:format in tests - just verify the operation completed
+    ok,
     
-    % Get database statistics
-    {ok, Stats} = lmdb:with_ro_txn(Env, fun(Txn) ->
+    % Get database statistics (skip io:format to avoid EUnit issues)
+    {ok, _Stats} = lmdb:with_ro_txn(Env, fun(Txn) ->
         {ok, Dbi} = lmdb:open_db(Txn, default),
         lmdb_nif:dbi_stat(Txn, Dbi)
     end),
-    
-    io:format("Database statistics: ~p~n", [Stats]),
     
     ok = lmdb:env_close(Env),
     io:format("Performance test completed~n").
