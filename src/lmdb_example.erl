@@ -1,6 +1,5 @@
-%% @doc Example usage of LMDB NIF
+%%% @doc Example usage of LMDB NIF
 -module(lmdb_example).
-
 -export([
     basic_example/0,
     transaction_example/0,
@@ -10,17 +9,26 @@
     performance_test/0,
     run_all_examples/0
 ]).
-
 -include("lmdb.hrl").
+
+-define(TEST_FILES, [
+    <<"test/example_db">>,
+    <<"test/tx_example_db">>,
+    <<"test/batch_example_db">>,
+    <<"test/iter_example_db">>,
+    <<"test/multi_db_example">>,
+    <<"test/perf_test_db">>
+]).
 
 %% @doc Basic key-value operations
 basic_example() ->
+    filelib:ensure_dir("test/example_db"),
     io:format("=== Basic LMDB Example ===~n"),
     
     % Create and configure environment
     {ok, Env} = lmdb:env_create(),
     ok = lmdb:env_set_mapsize(Env, 10485760), % 10MB
-    ok = lmdb:env_open(Env, "example_db", ?MDB_CREATE bor ?MDB_NOSUBDIR),
+    ok = lmdb:env_open(Env, "test/example_db", ?MDB_CREATE bor ?MDB_NOSUBDIR),
     
     % Simple put/get operations
     {ok, Value} = lmdb:with_txn(Env, fun(Txn) ->
@@ -39,7 +47,7 @@ basic_example() ->
     end),
     
     % Read-only access
-    {ok, <<"Bob Jones">>} = lmdb:with_ro_txn(Env, fun(Txn) ->
+    {ok, {ok, <<"Bob Jones">>}} = lmdb:with_ro_txn(Env, fun(Txn) ->
         {ok, Dbi} = lmdb:open_db(Txn, default),
         lmdb:get(Txn, Dbi, <<"user:bob">>)
     end),
@@ -50,11 +58,12 @@ basic_example() ->
 
 %% @doc Transaction rollback example
 transaction_example() ->
+    filelib:ensure_dir("test/tx_example_db"),
     io:format("=== Transaction Example ===~n"),
     
     {ok, Env} = lmdb:env_create(),
     ok = lmdb:env_set_mapsize(Env, 10485760),
-    ok = lmdb:env_open(Env, "tx_example_db", ?MDB_CREATE bor ?MDB_NOSUBDIR),
+    ok = lmdb:env_open(Env, "test/tx_example_db", ?MDB_CREATE bor ?MDB_NOSUBDIR),
     
     % Successful transaction
     {ok, success} = lmdb:with_txn(Env, fun(Txn) ->
@@ -88,11 +97,12 @@ transaction_example() ->
 
 %% @doc Batch operations example
 batch_example() ->
+    filelib:ensure_dir("test/batch_example_db"),
     io:format("=== Batch Operations Example ===~n"),
     
     {ok, Env} = lmdb:env_create(),
     ok = lmdb:env_set_mapsize(Env, 10485760),
-    ok = lmdb:env_open(Env, "batch_example_db", ?MDB_CREATE bor ?MDB_NOSUBDIR),
+    ok = lmdb:env_open(Env, "test/batch_example_db", ?MDB_CREATE bor ?MDB_NOSUBDIR),
     
     % Get database handle
     {ok, Dbi} = lmdb:with_txn(Env, fun(Txn) ->
@@ -119,11 +129,12 @@ batch_example() ->
 
 %% @doc Database iteration example
 iteration_example() ->
+    filelib:ensure_dir("test/iter_example_db"),
     io:format("=== Iteration Example ===~n"),
     
     {ok, Env} = lmdb:env_create(),
     ok = lmdb:env_set_mapsize(Env, 10485760),
-    ok = lmdb:env_open(Env, "iter_example_db", ?MDB_CREATE bor ?MDB_NOSUBDIR),
+    ok = lmdb:env_open(Env, "test/iter_example_db", ?MDB_CREATE bor ?MDB_NOSUBDIR),
     
     % Setup test data
     {ok, Dbi} = lmdb:with_txn(Env, fun(Txn) ->
@@ -163,12 +174,13 @@ iteration_example() ->
 
 %% @doc Multiple databases example
 multi_db_example() ->
+    filelib:ensure_dir("test/multi_db_example"),
     io:format("=== Multiple Databases Example ===~n"),
     
     {ok, Env} = lmdb:env_create(),
     ok = lmdb:env_set_maxdbs(Env, 5), % Allow multiple databases
     ok = lmdb:env_set_mapsize(Env, 10485760),
-    ok = lmdb:env_open(Env, "multi_db_example", ?MDB_CREATE bor ?MDB_NOSUBDIR),
+    ok = lmdb:env_open(Env, "test/multi_db_example", ?MDB_CREATE bor ?MDB_NOSUBDIR),
     
     {ok, Result} = lmdb:with_txn(Env, fun(Txn) ->
         % Open multiple databases
@@ -199,41 +211,56 @@ multi_db_example() ->
     ok = lmdb:env_close(Env),
     io:format("Multi-database example completed~n").
 
-%% @doc Performance test example
+%% @doc Performance test example. By default, it performs 1M writes and 1M reads
+%% over a 100MB database.
 performance_test() ->
+    performance_test(1_000_000, 1_000_000, 600*1024*1024). % 600MB
+
+performance_test(WriteOps, ReadOps, DBSize) ->
+    filelib:ensure_dir("test/perf_test_db"),
     io:format("=== Performance Test ===~n"),
-    
+    io:format("    Performing writes: ~w ops.~n", [WriteOps]),
+    % Initialize environment
     {ok, Env} = lmdb:env_create(),
-    ok = lmdb:env_set_mapsize(Env, 104857600), % 100MB
-    ok = lmdb:env_open(Env, "perf_test_db", ?MDB_CREATE bor ?MDB_NOSUBDIR),
-    
-    NumRecords = 10000,
-    
-    % Time batch write
-    {WriteTime, {ok, ok}} = timer:tc(fun() ->
-        lmdb:with_txn(Env, fun(Txn) ->
-            {ok, Dbi} = lmdb:open_db(Txn, default),
-            
-            % Write records directly instead of using write_batch
-            lists:foreach(fun(N) ->
-                Key = list_to_binary("key" ++ integer_to_list(N)),
-                Value = list_to_binary("value" ++ integer_to_list(N) ++ 
-                                       "_with_some_additional_data_to_make_it_longer"),
-                ok = lmdb:put(Txn, Dbi, Key, Value)
-            end, lists:seq(1, NumRecords)),
-            
-            ok
-        end)
-    end),
-    
-    WriteRate = NumRecords / (WriteTime / 1000000),
-    % Skip io:format in tests - just verify the operation completed
-    ok,
-    
-    % Time random reads
-    Keys = [list_to_binary("key" ++ integer_to_list(N)) || 
-            N <- [rand:uniform(NumRecords) || _ <- lists:seq(1, 1000)]],
-    
+    ok = lmdb:env_set_mapsize(Env, DBSize),
+    ok = lmdb:env_open(Env, "test/perf_test_db", ?MDB_CREATE bor ?MDB_NOSUBDIR),
+    % Write `WriteOps' records to the new database.
+    RandomData = base64:encode(crypto:strong_rand_bytes(32)),
+    {WriteTime, {ok, ok}} =
+        timer:tc(
+            fun() ->
+            lmdb:with_txn(Env, fun(Txn) ->
+                {ok, Dbi} = lmdb:open_db(Txn, default),
+                % Write records directly instead of using write_batch.
+                lists:foreach(
+                    fun(N) ->
+                        ok =
+                            lmdb:put(
+                                Txn,
+                                Dbi,
+                                <<"key", N:256/integer>>,
+                                RandomData
+                            )
+                    end,
+                    lists:seq(1, WriteOps)
+                ),
+                ok
+            end)
+        end),
+    % Calculate write rate.
+    WriteRate = erlang:round(WriteOps / (WriteTime / 1000000)),
+    io:format("    Write time: ~w ms~n", [WriteTime/1000]),
+    io:format("    Write rate: ~w records/second~n", [WriteRate]),
+    io:format("    Performing reads: ~w ops.~n", [ReadOps]),
+    % Generate keys to read ahead of time.
+    Keys =
+        lists:map(
+            fun(_) ->
+                << "key", (rand:uniform(ReadOps)):256/integer >>
+            end,
+            lists:seq(1, ReadOps)
+        ),
+    % Time random reads.
     {ReadTime, {ok, _}} = timer:tc(fun() ->
         lmdb:with_ro_txn(Env, fun(Txn) ->
             {ok, Dbi} = lmdb:open_db(Txn, default),
@@ -243,17 +270,20 @@ performance_test() ->
             ok
         end)
     end),
-    
-    ReadRate = 1000 / (ReadTime / 1000000),
-    % Skip io:format in tests - just verify the operation completed
-    ok,
-    
-    % Get database statistics (skip io:format to avoid EUnit issues)
-    {ok, _Stats} = lmdb:with_ro_txn(Env, fun(Txn) ->
-        {ok, Dbi} = lmdb:open_db(Txn, default),
-        lmdb_nif:dbi_stat(Txn, Dbi)
-    end),
-    
+    % Calculate read rate.
+    ReadRate = erlang:round(ReadOps / (ReadTime / 1000000)),
+    io:format("    Read time: ~w ms~n", [ReadTime/1000]),
+    io:format("    Read rate: ~w records/second~n", [ReadRate]),
+    % Get database statistics
+    {ok, Stats} =
+        lmdb:with_ro_txn(
+            Env,
+            fun(Txn) ->
+                {ok, Dbi} = lmdb:open_db(Txn, default),
+                lmdb_nif:dbi_stat(Txn, Dbi)
+            end
+        ),
+    io:format("    Database statistics: ~p~n", [Stats]),
     ok = lmdb:env_close(Env),
     io:format("Performance test completed~n").
 
@@ -265,7 +295,12 @@ run_all_examples() ->
     iteration_example(),
     multi_db_example(),
     performance_test(),
-    
     % Cleanup
-    os:cmd("rm -rf example_db tx_example_db batch_example_db iter_example_db multi_db_example perf_test_db"),
+    os:cmd(
+        "rm -rf " ++
+            string:join(
+                lists:map(fun binary_to_list/1, ?TEST_FILES),
+                " "
+            )
+    ),
     io:format("All examples completed successfully!~n").

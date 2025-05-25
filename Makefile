@@ -189,7 +189,7 @@ test: compile
 
 # Clean target
 clean:
-	rm -rf c_src/*.o c_src/*.d
+	rm -rf c_src/*.o c_src/*.d _build test
 	rm -rf $(PRIV_DIR) $(EBIN_DIR)
 	rm -rf $(LMDB_BASE_DIR)
 
