@@ -1,0 +1,30 @@
+%% src/lmdb_nif.app.src
+{application, lmdb_nif,
+ [
+  {description, "Erlang NIF bindings for Lightning Memory-Mapped Database (LMDB)"},
+  {vsn, "1.0.0"},
+  {registered, []},
+  {applications, [
+                  kernel,
+                  stdlib
+                 ]},
+  {env, []},
+  {modules, []},
+  {licenses, ["MIT"]},
+  {links, [
+    {"GitHub", "https://github.com/yourorg/lmdb_nif"},
+    {"LMDB", "http://www.lmdb.tech/doc/"}
+  ]},
+  {maintainers, ["Your Name"]},
+  {files, [
+    "src",
+    "c_src", 
+    "include",
+    "priv",
+    "rebar.config",
+    "rebar.lock",
+    "README.md",
+    "LICENSE",
+    "Makefile"
+  ]}
+ ]}.
