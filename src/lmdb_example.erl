@@ -226,26 +226,20 @@ performance_test(WriteOps, ReadOps, DBSize) ->
     ok = lmdb:env_open(Env, "test/perf_test_db", ?MDB_CREATE bor ?MDB_NOSUBDIR),
     % Write `WriteOps' records to the new database.
     RandomData = base64:encode(crypto:strong_rand_bytes(32)),
-    {WriteTime, {ok, ok}} =
+    {WriteTime, ok} =
         timer:tc(
             fun() ->
-            lmdb:with_txn(Env, fun(Txn) ->
-                {ok, Dbi} = lmdb:open_db(Txn, default),
-                % Write records directly instead of using write_batch.
                 lists:foreach(
                     fun(N) ->
-                        ok =
-                            lmdb:put(
-                                Txn,
-                                Dbi,
-                                <<"key", N:256/integer>>,
-                                RandomData
-                            )
+                        lmdb:put(
+                            Env,
+                            <<"key", N:256/integer>>,
+                            RandomData,
+                            [nosync, create]
+                        )
                     end,
                     lists:seq(1, WriteOps)
-                ),
-                ok
-            end)
+                )
         end),
     % Calculate write rate.
     WriteRate = erlang:round(WriteOps / (WriteTime / 1000000)),
@@ -261,14 +255,13 @@ performance_test(WriteOps, ReadOps, DBSize) ->
             lists:seq(1, ReadOps)
         ),
     % Time random reads.
-    {ReadTime, {ok, _}} = timer:tc(fun() ->
-        lmdb:with_ro_txn(Env, fun(Txn) ->
-            {ok, Dbi} = lmdb:open_db(Txn, default),
-            lists:foreach(fun(Key) ->
-                lmdb:get(Txn, Dbi, Key)
-            end, Keys),
-            ok
-        end)
+    {ReadTime, ok} = timer:tc(fun() ->
+        lists:foreach(
+            fun(Key) ->
+                {ok, _} = lmdb:get(Env, Key)
+            end,
+            Keys
+        )
     end),
     % Calculate read rate.
     ReadRate = erlang:round(ReadOps / (ReadTime / 1000000)),
