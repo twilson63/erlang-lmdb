@@ -48,15 +48,22 @@
 
 -include("lmdb.hrl").
 
+-define(IS_ATOM_OR_STRING(X), (is_atom(X) orelse is_binary(X) orelse is_list(X))).
+-define(IS_NON_NEG_INT(X), (is_integer(X) andalso X >= 0)).
+
 %% @doc Create a new LMDB environment
 -spec env_create() -> {ok, lmdb_env()} | {error, term()}.
 env_create() ->
     lmdb_nif:env_create().
+
+-spec env_create(string() | binary()) -> {ok, lmdb_env()} | {error, term()}.
 env_create(Path) ->
     env_create(Path, ?DEFAULT_MAPSIZE).
+
+-spec env_create(string() | binary(), integer() | map()) -> {ok, lmdb_env()} | {error, term()}.
 env_create(Path, Size) when is_integer(Size) ->
     env_create(Path, #{ max_mapsize => Size });
-env_create(Path, Opts) ->
+env_create(Path, Opts) when is_map(Opts) ->
     maybe
         {ok, Env} ?= env_create(maps:get(flags, Opts, [create])),
         ok ?= env_set_mapsize(Env, maps:get(max_mapsize, Opts, ?DEFAULT_MAPSIZE)),
@@ -64,7 +71,9 @@ env_create(Path, Opts) ->
         ok ?= env_set_maxdbs(Env, maps:get(max_dbs, Opts, ?DEFAULT_MAXDBS)),
         ok ?= env_open(Env, Path),
         {ok, Env}
-    end.
+    end;
+env_create(_Path, _) ->
+  {error, {badarg, "Path should be map"}}.
 
 %% @doc Open an LMDB environment with default flags
 -spec env_open(lmdb_env(), string()) -> ok | {error, term()}.
@@ -73,62 +82,82 @@ env_open(Env, Path) ->
 
 %% @doc Open an LMDB environment with specified flags
 -spec env_open(lmdb_env(), string(), non_neg_integer()) -> ok | {error, term()}.
-env_open(Env, Path, Flags) when is_binary(Path) ->
+env_open(Env, Path, Flags) when is_reference(Env), is_binary(Path) ->
     env_open(Env, binary_to_list(Path), Flags);
-env_open(Env, Path, Flags) when is_list(Flags) ->
+env_open(Env, Path, Flags) when is_reference(Env), is_list(Flags) ->
     env_open(Env, Path, merge_flags(Flags));
-env_open(Env, Path, Flags) ->
+env_open(Env, Path, Flags) when is_reference(Env) ->
     case Flags band ?MDB_NOSUBDIR of
         0 -> filelib:ensure_dir(Path ++ "/data.mdb");
         _ -> ok
     end,
-    lmdb_nif:env_open(Env, Path, Flags).
+    lmdb_nif:env_open(Env, Path, Flags);
+env_open(_, _, _) ->
+   {error, {badarg, "Env should be reference."}}.
 
 %% @doc Close an LMDB environment
 -spec env_close(lmdb_env()) -> ok.
-env_close(Env) ->
-    lmdb_nif:env_close(Env).
+env_close(Env) when is_reference(Env) ->
+    lmdb_nif:env_close(Env);
+env_close(_) -> 
+   {error, {badarg, "Env must be a reference"}}.
 
 %% @doc Set maximum number of reader threads
 -spec env_set_maxreaders(lmdb_env(), pos_integer()) -> ok | {error, term()}.
-env_set_maxreaders(Env, Readers) ->
-    lmdb_nif:env_set_maxreaders(Env, Readers).
+env_set_maxreaders(Env, Readers) when is_reference(Env), is_integer(Readers) ->
+    lmdb_nif:env_set_maxreaders(Env, Readers);
+env_set_maxreaders(_, _) ->
+   {error, {badarg, "Readers must be a number and Env must be a reference."}}.
 
 %% @doc Set maximum number of databases
 -spec env_set_maxdbs(lmdb_env(), pos_integer()) -> ok | {error, term()}.
-env_set_maxdbs(Env, Dbs) ->
-    lmdb_nif:env_set_maxdbs(Env, Dbs).
+env_set_maxdbs(Env, Dbs) when is_reference(Env), is_integer(Dbs) ->
+    lmdb_nif:env_set_maxdbs(Env, Dbs);
+env_set_maxdbs(_, _) ->
+    {error, {badarg, "Dbs must be a number and Env must be a reference"}}.
 
 %% @doc Set memory map size for the environment
 -spec env_set_mapsize(lmdb_env(), pos_integer()) -> ok | {error, term()}.
-env_set_mapsize(Env, Size) ->
-    lmdb_nif:env_set_mapsize(Env, Size).
+env_set_mapsize(Env, Size) when is_reference(Env), is_integer(Size) ->
+    lmdb_nif:env_set_mapsize(Env, Size);
+env_set_mapsize(_, _) ->
+    {error, {badarg, "Size must be a number and Env must be a reference"}}.
 
 %% @doc Sync environment to disk (force=false)
 -spec env_sync(lmdb_env()) -> ok | {error, term()}.
-env_sync(Env) ->
-    env_sync(Env, false).
+env_sync(Env) when is_reference(Env) ->
+    env_sync(Env, false);
+env_sync(_) ->
+    {error, {badarg, "Env must be a reference"}}.
 
 %% @doc Sync environment to disk with force option
 -spec env_sync(lmdb_env(), boolean()) -> ok | {error, term()}.
-env_sync(Env, Force) ->
-    lmdb_nif:env_sync(Env, case Force of true -> 1; false -> 0 end).
+env_sync(Env, Force) when is_reference(Env), is_boolean(Force) ->
+    lmdb_nif:env_sync(Env, case Force of true -> 1; false -> 0 end);
+env_sync(_, _) ->
+    {error, {badarg, "Force must be boolean and Env must be a reference"}}.
 
 %% @doc Open a database with default flags
 -spec open_db(lmdb_txn(), atom() | string()) -> {ok, lmdb_dbi()} | {error, term()}.
-open_db(Txn, Name) ->
-    open_db(Txn, Name, ?MDB_CREATE).
+open_db(Txn, Name) when is_reference(Txn), ?IS_ATOM_OR_STRING(Name) ->
+    open_db(Txn, Name, ?MDB_CREATE);
+open_db(_, _) ->
+    {error, {badarg, "Txn must be reference and Name must be an atom or string"}}.
 
 %% @doc Open a database with specified flags
 -spec open_db(lmdb_txn(), atom() | string(), non_neg_integer()) -> {ok, lmdb_dbi()} | {error, term()}.
-open_db(Txn, Name, Flags) ->
+open_db(Txn, Name, Flags) when is_reference(Txn), ?IS_ATOM_OR_STRING(Name), ?IS_NON_NEG_INT(Flags) ->
     DbName = case Name of
         default -> undefined;
         undefined -> undefined;
         _ when is_atom(Name) -> atom_to_list(Name);
         _ -> Name
     end,
-    lmdb_nif:dbi_open(Txn, DbName, Flags).
+    lmdb_nif:dbi_open(Txn, DbName, Flags);
+open_db(_, _, _) ->
+    {error, {badargs, 
+        "Txn must be reference, Name, must be atom or string, and Flags, must be non negative integer"
+    }}.
 
 %% @doc Close a database
 -spec close_db(lmdb_env(), lmdb_dbi()) -> ok.
