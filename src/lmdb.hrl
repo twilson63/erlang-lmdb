@@ -1,6 +1,10 @@
 %% @doc LMDB type definitions and constants
 %% include/lmdb.hrl
 
+-define(DEFAULT_MAPSIZE, 10 * 1024 * 1024). %% 10MB
+-define(DEFAULT_MAXREADERS, 16).
+-define(DEFAULT_MAXDBS, 100).
+
 %% Type definitions
 -type lmdb_env() :: reference().
 -type lmdb_txn() :: reference().
