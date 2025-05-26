@@ -11,6 +11,7 @@ lmdb_test_() ->
      fun cleanup/1,
      [
          fun test_env_create_and_open/0,
+         fun test_erlang_api/0,
          fun test_basic_operations/0,
          fun test_transactions/0,
          fun test_batch_operations/0,
@@ -29,6 +30,13 @@ cleanup(_) ->
     % Clean up all test databases and directory
     os:cmd("rm -rf " ++ ?TEST_DB_PATH ++ "*"),
     os:cmd("rm -rf test_lmdb_dir").
+
+test_erlang_api() ->
+    {ok, Env} = lmdb:env_create(),
+    ok = lmdb:env_open(Env, ?TEST_DB_PATH ++ "_erlang_api", [nosubdir, create]),
+    ok = lmdb:put(Env, <<"key1">>, <<"value1">>),
+    {ok, <<"value1">>} = lmdb:get(Env, <<"key1">>),
+    ok = lmdb:env_close(Env).
 
 %% Test environment creation and opening
 test_env_create_and_open() ->

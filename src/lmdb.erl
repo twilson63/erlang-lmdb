@@ -4,6 +4,8 @@
 -export([
     % Environment management
     env_create/0,
+    env_create/1,
+    env_create/2,
     env_open/2,
     env_open/3,
     env_close/1,
@@ -19,7 +21,9 @@
     close_db/2,
     
     % Simple key-value operations
+    get/2,
     get/3,
+    put/3,
     put/4,
     put/5,
     delete/3,
@@ -48,6 +52,19 @@
 -spec env_create() -> {ok, lmdb_env()} | {error, term()}.
 env_create() ->
     lmdb_nif:env_create().
+env_create(Path) ->
+    env_create(Path, ?DEFAULT_MAPSIZE).
+env_create(Path, Size) when is_integer(Size) ->
+    env_create(Path, #{ max_mapsize => Size });
+env_create(Path, Opts) ->
+    maybe
+        {ok, Env} ?= env_create(),
+        % ok ?= env_set_mapsize(Env, maps:get(max_mapsize, Opts, ?DEFAULT_MAPSIZE)),
+        % ok ?= env_set_maxreaders(Env, maps:get(max_readers, Opts, ?DEFAULT_MAXREADERS)),
+        % ok ?= env_set_maxdbs(Env, maps:get(max_dbs, Opts, ?DEFAULT_MAXDBS)),
+        ok ?= env_open(Env, Path),
+        {ok, Env}
+    end.
 
 %% @doc Open an LMDB environment with default flags
 -spec env_open(lmdb_env(), string()) -> ok | {error, term()}.
@@ -56,7 +73,15 @@ env_open(Env, Path) ->
 
 %% @doc Open an LMDB environment with specified flags
 -spec env_open(lmdb_env(), string(), non_neg_integer()) -> ok | {error, term()}.
+env_open(Env, Path, Flags) when is_binary(Path) ->
+    env_open(Env, binary_to_list(Path), Flags);
+env_open(Env, Path, Flags) when is_list(Flags) ->
+    env_open(Env, Path, merge_flags(Flags));
 env_open(Env, Path, Flags) ->
+    case Flags band ?MDB_NOSUBDIR of
+        0 -> filelib:ensure_dir(Path ++ "/data.mdb");
+        _ -> ok
+    end,
     lmdb_nif:env_open(Env, Path, Flags).
 
 %% @doc Close an LMDB environment
@@ -111,6 +136,24 @@ close_db(Env, Dbi) ->
     lmdb_nif:dbi_close(Env, Dbi).
 
 %% @doc Get a value by key
+get(Env, Key) ->
+    Res = 
+        with_ro_txn(
+            Env,
+            fun(Txn) ->
+                case open_db(Txn, default) of
+                    {ok, Dbi} ->
+                        get(Txn, Dbi, Key);
+                    Error ->
+                        Error
+                end
+            end
+        ),
+    case Res of
+        {ok, Value} -> Value;
+        Error -> Error
+    end.
+
 -spec get(lmdb_txn(), lmdb_dbi(), binary()) -> {ok, binary()} | not_found | {error, term()}.
 get(Txn, Dbi, Key) when is_binary(Key) ->
     lmdb_nif:get(Txn, Dbi, Key);
@@ -118,6 +161,26 @@ get(Txn, Dbi, Key) ->
     get(Txn, Dbi, term_to_binary(Key)).
 
 %% @doc Put a key-value pair with default flags
+put(Env, Key, Value) ->
+    Res =
+        with_txn(
+            Env,
+            fun(Txn) ->
+                case open_db(Txn, default) of
+                    {ok, Dbi} ->
+                        ok = put(Txn, Dbi, Key, Value),
+                        ok = close_db(Env, Dbi),
+                        ok;
+                    Error ->
+                        Error
+                end
+            end
+        ),
+    case Res of
+        {ok, ok} -> ok;
+        Error -> Error
+    end.
+
 -spec put(lmdb_txn(), lmdb_dbi(), binary(), binary()) -> ok | {error, term()}.
 put(Txn, Dbi, Key, Value) ->
     put(Txn, Dbi, Key, Value, 0).
@@ -268,3 +331,83 @@ cursor_op_to_int(first) -> 0;
 cursor_op_to_int(next) -> 8;
 cursor_op_to_int(prev) -> 12;
 cursor_op_to_int(last) -> 4.
+
+merge_flags(List) ->
+    lists:foldl(
+        fun(Flag, Acc) ->
+            flag_to_enum(Flag) bor Acc
+        end,
+        0,
+        List
+    ).
+
+%% @doc Convert flag atoms to their enum equivalents.
+flag_to_enum(read_only) -> ?MDB_RDONLY;
+flag_to_enum(write) -> 0;
+flag_to_enum(create) -> ?MDB_CREATE;
+flag_to_enum(no_overwrite) -> ?MDB_NOOVERWRITE;
+flag_to_enum(no_dup_data) -> ?MDB_NODUPDATA;
+flag_to_enum(current) -> ?MDB_CURRENT;
+flag_to_enum(reserve) -> ?MDB_RESERVE;
+flag_to_enum(append) -> ?MDB_APPEND;
+flag_to_enum(append_dup) -> ?MDB_APPENDDUP;
+flag_to_enum(multiple) -> ?MDB_MULTIPLE;
+%% Environment flags
+flag_to_enum(fixedmap) -> ?MDB_FIXEDMAP;
+flag_to_enum(nosubdir) -> ?MDB_NOSUBDIR;
+flag_to_enum(nosync) -> ?MDB_NOSYNC;
+flag_to_enum(nometasync) -> ?MDB_NOMETASYNC;
+flag_to_enum(writemap) -> ?MDB_WRITEMAP;
+flag_to_enum(mapasync) -> ?MDB_MAPASYNC;
+flag_to_enum(notls) -> ?MDB_NOTLS;
+flag_to_enum(nolock) -> ?MDB_NOLOCK;
+flag_to_enum(nordahead) -> ?MDB_NORDAHEAD;
+flag_to_enum(nomeminit) -> ?MDB_NOMEMINIT;
+%% Database flags
+flag_to_enum(reversekey) -> ?MDB_REVERSEKEY;
+flag_to_enum(dupsort) -> ?MDB_DUPSORT;
+flag_to_enum(integerkey) -> ?MDB_INTEGERKEY;
+flag_to_enum(dupfixed) -> ?MDB_DUPFIXED;
+flag_to_enum(integerdup) -> ?MDB_INTEGERDUP;
+flag_to_enum(reversedup) -> ?MDB_REVERSEDUP;
+%% Cursor operations
+flag_to_enum(first) -> ?MDB_FIRST;
+flag_to_enum(first_dup) -> ?MDB_FIRST_DUP;
+flag_to_enum(get_both) -> ?MDB_GET_BOTH;
+flag_to_enum(get_both_range) -> ?MDB_GET_BOTH_RANGE;
+flag_to_enum(get_current) -> ?MDB_GET_CURRENT;
+flag_to_enum(get_multiple) -> ?MDB_GET_MULTIPLE;
+flag_to_enum(last) -> ?MDB_LAST;
+flag_to_enum(last_dup) -> ?MDB_LAST_DUP;
+flag_to_enum(next) -> ?MDB_NEXT;
+flag_to_enum(next_dup) -> ?MDB_NEXT_DUP;
+flag_to_enum(next_multiple) -> ?MDB_NEXT_MULTIPLE;
+flag_to_enum(next_nodup) -> ?MDB_NEXT_NODUP;
+flag_to_enum(prev) -> ?MDB_PREV;
+flag_to_enum(prev_dup) -> ?MDB_PREV_DUP;
+flag_to_enum(prev_nodup) -> ?MDB_PREV_NODUP;
+flag_to_enum(set) -> ?MDB_SET;
+flag_to_enum(set_key) -> ?MDB_SET_KEY;
+flag_to_enum(set_range) -> ?MDB_SET_RANGE;
+%% Error codes (commonly used)
+flag_to_enum(success) -> ?MDB_SUCCESS;
+flag_to_enum(keyexist) -> ?MDB_KEYEXIST;
+flag_to_enum(notfound) -> ?MDB_NOTFOUND;
+flag_to_enum(page_notfound) -> ?MDB_PAGE_NOTFOUND;
+flag_to_enum(corrupted) -> ?MDB_CORRUPTED;
+flag_to_enum(panic) -> ?MDB_PANIC;
+flag_to_enum(version_mismatch) -> ?MDB_VERSION_MISMATCH;
+flag_to_enum(invalid) -> ?MDB_INVALID;
+flag_to_enum(map_full) -> ?MDB_MAP_FULL;
+flag_to_enum(dbs_full) -> ?MDB_DBS_FULL;
+flag_to_enum(readers_full) -> ?MDB_READERS_FULL;
+flag_to_enum(tls_full) -> ?MDB_TLS_FULL;
+flag_to_enum(txn_full) -> ?MDB_TXN_FULL;
+flag_to_enum(cursor_full) -> ?MDB_CURSOR_FULL;
+flag_to_enum(page_full) -> ?MDB_PAGE_FULL;
+flag_to_enum(map_resized) -> ?MDB_MAP_RESIZED;
+flag_to_enum(incompatible) -> ?MDB_INCOMPATIBLE;
+flag_to_enum(bad_rslot) -> ?MDB_BAD_RSLOT;
+flag_to_enum(bad_txn) -> ?MDB_BAD_TXN;
+flag_to_enum(bad_valsize) -> ?MDB_BAD_VALSIZE;
+flag_to_enum(bad_dbi) -> ?MDB_BAD_DBI.
