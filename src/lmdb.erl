@@ -59,9 +59,9 @@ env_create(Path, Size) when is_integer(Size) ->
 env_create(Path, Opts) ->
     maybe
         {ok, Env} ?= env_create(),
-        % ok ?= env_set_mapsize(Env, maps:get(max_mapsize, Opts, ?DEFAULT_MAPSIZE)),
-        % ok ?= env_set_maxreaders(Env, maps:get(max_readers, Opts, ?DEFAULT_MAXREADERS)),
-        % ok ?= env_set_maxdbs(Env, maps:get(max_dbs, Opts, ?DEFAULT_MAXDBS)),
+        ok ?= env_set_mapsize(Env, maps:get(max_mapsize, Opts, ?DEFAULT_MAPSIZE)),
+        ok ?= env_set_maxreaders(Env, maps:get(max_readers, Opts, ?DEFAULT_MAXREADERS)),
+        ok ?= env_set_maxdbs(Env, maps:get(max_dbs, Opts, ?DEFAULT_MAXDBS)),
         ok ?= env_open(Env, Path),
         {ok, Env}
     end.
@@ -137,11 +137,15 @@ close_db(Env, Dbi) ->
 
 %% @doc Get a value by key
 get(Env, Key) ->
+    get(Env, Key, [create]).
+get(Env, Key, Flags) when is_list(Flags) ->
+    get(Env, Key, merge_flags(Flags));
+get(Env, Key, FlagsInt) when is_integer(FlagsInt) ->
     Res = 
         with_ro_txn(
             Env,
             fun(Txn) ->
-                case open_db(Txn, default) of
+                case open_db(Txn, default, FlagsInt) of
                     {ok, Dbi} ->
                         get(Txn, Dbi, Key);
                     Error ->
@@ -152,9 +156,7 @@ get(Env, Key) ->
     case Res of
         {ok, Value} -> Value;
         Error -> Error
-    end.
-
--spec get(lmdb_txn(), lmdb_dbi(), binary()) -> {ok, binary()} | not_found | {error, term()}.
+    end;
 get(Txn, Dbi, Key) when is_binary(Key) ->
     lmdb_nif:get(Txn, Dbi, Key);
 get(Txn, Dbi, Key) ->
@@ -162,11 +164,15 @@ get(Txn, Dbi, Key) ->
 
 %% @doc Put a key-value pair with default flags
 put(Env, Key, Value) ->
+    put(Env, Key, Value, [create]).
+put(Env, Key, Value, Flags) when is_list(Flags) ->
+    put(Env, Key, Value, merge_flags(Flags));
+put(Env, Key, Value, FlagsInt) when is_integer(FlagsInt) ->
     Res =
         with_txn(
             Env,
             fun(Txn) ->
-                case open_db(Txn, default) of
+                case open_db(Txn, default, FlagsInt) of
                     {ok, Dbi} ->
                         ok = put(Txn, Dbi, Key, Value),
                         ok = close_db(Env, Dbi),
@@ -179,9 +185,7 @@ put(Env, Key, Value) ->
     case Res of
         {ok, ok} -> ok;
         Error -> Error
-    end.
-
--spec put(lmdb_txn(), lmdb_dbi(), binary(), binary()) -> ok | {error, term()}.
+    end;
 put(Txn, Dbi, Key, Value) ->
     put(Txn, Dbi, Key, Value, 0).
 
