@@ -177,7 +177,7 @@ test_iteration() ->
     end),
     
     %% Test fold
-    {ok, Keys} = lmdb:fold(Env, Dbi, fun(Key, _Value, Acc) ->
+    {ok, Keys} = lmdb:fold(Env, default, fun(Key, _Value, Acc) ->
         [Key | Acc]
     end, []),
     

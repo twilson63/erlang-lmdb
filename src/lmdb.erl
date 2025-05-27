@@ -301,8 +301,19 @@ write_batch(Env, Operations) ->
     end).
 
 %% @doc Fold over all key-value pairs in a database
--spec fold(lmdb_env(), lmdb_dbi(), fun((binary(), binary(), Acc) -> Acc), Acc) -> {ok, Acc} | {error, term()}.
-fold(Env, Dbi, Fun, Acc0) ->
+-spec fold(
+  lmdb_env(), 
+  atom() | string(), 
+  fun((binary(), binary(), Acc) -> Acc), 
+  Acc
+) -> {ok, Acc} | {error, term()}.
+fold(Env, Name, Fun, Acc0) ->
+    {ok, Dbi} = with_txn(Env, 
+      fun(Txn) -> 
+        {ok, Dbi} = open_db(Txn, Name), 
+        Dbi 
+      end
+    ),
     with_ro_txn(Env, fun(Txn) ->
         case lmdb_nif:cursor_open(Txn, Dbi) of
             {ok, Cursor} ->
