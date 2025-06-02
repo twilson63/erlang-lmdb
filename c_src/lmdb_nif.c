@@ -23,6 +23,9 @@ typedef struct {
 
 // Helper functions
 static ERL_NIF_TERM make_atom(ErlNifEnv* env, const char* name) {
+    if (!env || !name) {
+        return enif_make_badarg(env);
+    }
     ERL_NIF_TERM ret;
     if (enif_make_existing_atom(env, name, &ret, ERL_NIF_LATIN1)) {
         return ret;
@@ -30,44 +33,123 @@ static ERL_NIF_TERM make_atom(ErlNifEnv* env, const char* name) {
     return enif_make_atom(env, name);
 }
 
+// Guard macros for common validation patterns
+#define VALIDATE_ARGC(expected) \
+    if (argc != (expected)) { \
+        return enif_make_badarg(env); \
+    }
+
+#define VALIDATE_ENV_HANDLE(handle_var, arg_index) \
+    env_handle* handle_var; \
+    if (!enif_get_resource(env, argv[arg_index], env_resource_type, (void**)&handle_var) || \
+        !handle_var || !handle_var->env) { \
+        return enif_make_badarg(env); \
+    }
+
+#define VALIDATE_TXN_HANDLE(handle_var, arg_index) \
+    txn_handle* handle_var; \
+    if (!enif_get_resource(env, argv[arg_index], txn_resource_type, (void**)&handle_var) || \
+        !handle_var || !handle_var->txn) { \
+        return enif_make_badarg(env); \
+    }
+
+#define VALIDATE_CURSOR_HANDLE(handle_var, arg_index) \
+    cursor_handle* handle_var; \
+    if (!enif_get_resource(env, argv[arg_index], cursor_resource_type, (void**)&handle_var) || \
+        !handle_var || !handle_var->cursor) { \
+        return enif_make_badarg(env); \
+    }
+
+#define VALIDATE_UINT(var_name, arg_index) \
+    unsigned int var_name; \
+    if (!enif_get_uint(env, argv[arg_index], &var_name)) { \
+        return enif_make_badarg(env); \
+    }
+
+#define VALIDATE_ULONG(var_name, arg_index) \
+    unsigned long var_name; \
+    if (!enif_get_ulong(env, argv[arg_index], &var_name)) { \
+        return enif_make_badarg(env); \
+    }
+
+#define VALIDATE_INT(var_name, arg_index) \
+    int var_name; \
+    if (!enif_get_int(env, argv[arg_index], &var_name)) { \
+        return enif_make_badarg(env); \
+    }
+
+#define VALIDATE_STRING(var_name, size, arg_index) \
+    char var_name[size]; \
+    if (!enif_get_string(env, argv[arg_index], var_name, sizeof(var_name), ERL_NIF_LATIN1)) { \
+        return enif_make_badarg(env); \
+    }
+
+#define VALIDATE_BINARY(var_name, arg_index) \
+    ErlNifBinary var_name; \
+    if (!enif_inspect_binary(env, argv[arg_index], &var_name)) { \
+        return enif_make_badarg(env); \
+    }
+
 // Removed unused make_error function - using make_mdb_error instead
 
 static ERL_NIF_TERM make_mdb_error(ErlNifEnv* env, int rc) {
+    if (!env) {
+        return enif_make_badarg(env);
+    }
+    const char* error_str = mdb_strerror(rc);
+    if (!error_str) {
+        error_str = "unknown_error";
+    }
     return enif_make_tuple2(env, make_atom(env, "error"), 
-                           enif_make_string(env, mdb_strerror(rc), ERL_NIF_LATIN1));
+                           enif_make_string(env, error_str, ERL_NIF_LATIN1));
 }
 
 // Resource destructors
 static void env_resource_dtor(ErlNifEnv* env, void* obj) {
+    if (!obj) return;
     env_handle* handle = (env_handle*)obj;
-    if (handle->env) {
+    if (handle && handle->env) {
         mdb_env_close(handle->env);
+        handle->env = NULL;
     }
 }
 
 static void txn_resource_dtor(ErlNifEnv* env, void* obj) {
+    if (!obj) return;
     txn_handle* handle = (txn_handle*)obj;
-    if (handle->txn) {
+    if (handle && handle->txn) {
         mdb_txn_abort(handle->txn);
+        handle->txn = NULL;
     }
 }
 
 static void cursor_resource_dtor(ErlNifEnv* env, void* obj) {
+    if (!obj) return;
     cursor_handle* handle = (cursor_handle*)obj;
-    if (handle->cursor) {
+    if (handle && handle->cursor) {
         mdb_cursor_close(handle->cursor);
+        handle->cursor = NULL;
     }
 }
 
 // NIF functions
 static ERL_NIF_TERM nif_env_create(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]) {
+    VALIDATE_ARGC(0);
+    
+    if (!env_resource_type) {
+        return enif_make_badarg(env);
+    }
+    
     env_handle* handle = enif_alloc_resource(env_resource_type, sizeof(env_handle));
     if (!handle) {
         return enif_make_badarg(env);
     }
     
+    // Initialize handle to safe state
+    handle->env = NULL;
+    
     int rc = mdb_env_create(&handle->env);
-    if (rc != 0) {
+    if (rc != 0 || !handle->env) {
         enif_release_resource(handle);
         return make_mdb_error(env, rc);
     }
@@ -78,13 +160,13 @@ static ERL_NIF_TERM nif_env_create(ErlNifEnv* env, int argc, const ERL_NIF_TERM 
 }
 
 static ERL_NIF_TERM nif_env_open(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]) {
-    env_handle* handle;
-    char path[1024];
-    unsigned int flags;
+    VALIDATE_ARGC(3);
+    VALIDATE_ENV_HANDLE(handle, 0);
+    VALIDATE_STRING(path, 1024, 1);
+    VALIDATE_UINT(flags, 2);
     
-    if (!enif_get_resource(env, argv[0], env_resource_type, (void**)&handle) ||
-        !enif_get_string(env, argv[1], path, sizeof(path), ERL_NIF_LATIN1) ||
-        !enif_get_uint(env, argv[2], &flags)) {
+    // Additional path validation
+    if (strlen(path) == 0) {
         return enif_make_badarg(env);
     }
     
@@ -97,9 +179,10 @@ static ERL_NIF_TERM nif_env_open(ErlNifEnv* env, int argc, const ERL_NIF_TERM ar
 }
 
 static ERL_NIF_TERM nif_env_close(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]) {
-    env_handle* handle;
+    VALIDATE_ARGC(1);
     
-    if (!enif_get_resource(env, argv[0], env_resource_type, (void**)&handle)) {
+    env_handle* handle;
+    if (!enif_get_resource(env, argv[0], env_resource_type, (void**)&handle) || !handle) {
         return enif_make_badarg(env);
     }
     
@@ -112,11 +195,12 @@ static ERL_NIF_TERM nif_env_close(ErlNifEnv* env, int argc, const ERL_NIF_TERM a
 }
 
 static ERL_NIF_TERM nif_env_set_maxreaders(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]) {
-    env_handle* handle;
-    unsigned int readers;
+    VALIDATE_ARGC(2);
+    VALIDATE_ENV_HANDLE(handle, 0);
+    VALIDATE_UINT(readers, 1);
     
-    if (!enif_get_resource(env, argv[0], env_resource_type, (void**)&handle) ||
-        !enif_get_uint(env, argv[1], &readers)) {
+    // Validate reasonable bounds for readers
+    if (readers == 0 || readers > 1024) {
         return enif_make_badarg(env);
     }
     
@@ -129,11 +213,12 @@ static ERL_NIF_TERM nif_env_set_maxreaders(ErlNifEnv* env, int argc, const ERL_N
 }
 
 static ERL_NIF_TERM nif_env_set_maxdbs(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]) {
-    env_handle* handle;
-    unsigned int dbs;
+    VALIDATE_ARGC(2);
+    VALIDATE_ENV_HANDLE(handle, 0);
+    VALIDATE_UINT(dbs, 1);
     
-    if (!enif_get_resource(env, argv[0], env_resource_type, (void**)&handle) ||
-        !enif_get_uint(env, argv[1], &dbs)) {
+    // Validate reasonable bounds for databases
+    if (dbs == 0 || dbs > 1024) {
         return enif_make_badarg(env);
     }
     
@@ -146,11 +231,12 @@ static ERL_NIF_TERM nif_env_set_maxdbs(ErlNifEnv* env, int argc, const ERL_NIF_T
 }
 
 static ERL_NIF_TERM nif_env_set_mapsize(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]) {
-    env_handle* handle;
-    unsigned long size;
+    VALIDATE_ARGC(2);
+    VALIDATE_ENV_HANDLE(handle, 0);
+    VALIDATE_ULONG(size, 1);
     
-    if (!enif_get_resource(env, argv[0], env_resource_type, (void**)&handle) ||
-        !enif_get_ulong(env, argv[1], &size)) {
+    // Validate reasonable bounds for map size (minimum 1KB, maximum 1TB)
+    if (size < 1024 || size > (1024UL * 1024UL * 1024UL * 1024UL)) {
         return enif_make_badarg(env);
     }
     
@@ -163,13 +249,9 @@ static ERL_NIF_TERM nif_env_set_mapsize(ErlNifEnv* env, int argc, const ERL_NIF_
 }
 
 static ERL_NIF_TERM nif_env_sync(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]) {
-    env_handle* handle;
-    int force;
-    
-    if (!enif_get_resource(env, argv[0], env_resource_type, (void**)&handle) ||
-        !enif_get_int(env, argv[1], &force)) {
-        return enif_make_badarg(env);
-    }
+    VALIDATE_ARGC(2);
+    VALIDATE_ENV_HANDLE(handle, 0);
+    VALIDATE_INT(force, 1);
     
     int rc = mdb_env_sync(handle->env, force);
     if (rc != 0) {
@@ -180,12 +262,11 @@ static ERL_NIF_TERM nif_env_sync(ErlNifEnv* env, int argc, const ERL_NIF_TERM ar
 }
 
 static ERL_NIF_TERM nif_env_stat(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]) {
-    env_handle* handle;
-    MDB_stat stat;
+    VALIDATE_ARGC(1);
+    VALIDATE_ENV_HANDLE(handle, 0);
     
-    if (!enif_get_resource(env, argv[0], env_resource_type, (void**)&handle)) {
-        return enif_make_badarg(env);
-    }
+    MDB_stat stat;
+    memset(&stat, 0, sizeof(stat));
     
     int rc = mdb_env_stat(handle->env, &stat);
     if (rc != 0) {
@@ -205,12 +286,11 @@ static ERL_NIF_TERM nif_env_stat(ErlNifEnv* env, int argc, const ERL_NIF_TERM ar
 }
 
 static ERL_NIF_TERM nif_env_info(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]) {
-    env_handle* handle;
-    MDB_envinfo info;
+    VALIDATE_ARGC(1);
+    VALIDATE_ENV_HANDLE(handle, 0);
     
-    if (!enif_get_resource(env, argv[0], env_resource_type, (void**)&handle)) {
-        return enif_make_badarg(env);
-    }
+    MDB_envinfo info;
+    memset(&info, 0, sizeof(info));
     
     int rc = mdb_env_info(handle->env, &info);
     if (rc != 0) {
@@ -230,18 +310,20 @@ static ERL_NIF_TERM nif_env_info(ErlNifEnv* env, int argc, const ERL_NIF_TERM ar
 }
 
 static ERL_NIF_TERM nif_txn_begin(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]) {
-    env_handle* env_handle_ptr;
-    txn_handle* parent_handle = NULL;
-    unsigned int flags;
+    VALIDATE_ARGC(3);
+    VALIDATE_ENV_HANDLE(env_handle_ptr, 0);
+    VALIDATE_UINT(flags, 2);
     
-    if (!enif_get_resource(env, argv[0], env_resource_type, (void**)&env_handle_ptr) ||
-        !enif_get_uint(env, argv[2], &flags)) {
+    if (!txn_resource_type) {
         return enif_make_badarg(env);
     }
     
+    txn_handle* parent_handle = NULL;
+    
     // Check if parent transaction is provided
     if (!enif_is_atom(env, argv[1])) {
-        if (!enif_get_resource(env, argv[1], txn_resource_type, (void**)&parent_handle)) {
+        if (!enif_get_resource(env, argv[1], txn_resource_type, (void**)&parent_handle) ||
+            !parent_handle || !parent_handle->txn) {
             return enif_make_badarg(env);
         }
     }
@@ -251,9 +333,12 @@ static ERL_NIF_TERM nif_txn_begin(ErlNifEnv* env, int argc, const ERL_NIF_TERM a
         return enif_make_badarg(env);
     }
     
+    // Initialize handle to safe state
+    handle->txn = NULL;
+    
     MDB_txn* parent_txn = parent_handle ? parent_handle->txn : NULL;
     int rc = mdb_txn_begin(env_handle_ptr->env, parent_txn, flags, &handle->txn);
-    if (rc != 0) {
+    if (rc != 0 || !handle->txn) {
         enif_release_resource(handle);
         return make_mdb_error(env, rc);
     }
@@ -264,11 +349,8 @@ static ERL_NIF_TERM nif_txn_begin(ErlNifEnv* env, int argc, const ERL_NIF_TERM a
 }
 
 static ERL_NIF_TERM nif_txn_commit(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]) {
-    txn_handle* handle;
-    
-    if (!enif_get_resource(env, argv[0], txn_resource_type, (void**)&handle)) {
-        return enif_make_badarg(env);
-    }
+    VALIDATE_ARGC(1);
+    VALIDATE_TXN_HANDLE(handle, 0);
     
     int rc = mdb_txn_commit(handle->txn);
     handle->txn = NULL; // Transaction is no longer valid after commit
@@ -281,9 +363,10 @@ static ERL_NIF_TERM nif_txn_commit(ErlNifEnv* env, int argc, const ERL_NIF_TERM 
 }
 
 static ERL_NIF_TERM nif_txn_abort(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]) {
-    txn_handle* handle;
+    VALIDATE_ARGC(1);
     
-    if (!enif_get_resource(env, argv[0], txn_resource_type, (void**)&handle)) {
+    txn_handle* handle;
+    if (!enif_get_resource(env, argv[0], txn_resource_type, (void**)&handle) || !handle) {
         return enif_make_badarg(env);
     }
     
@@ -296,24 +379,25 @@ static ERL_NIF_TERM nif_txn_abort(ErlNifEnv* env, int argc, const ERL_NIF_TERM a
 }
 
 static ERL_NIF_TERM nif_dbi_open(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]) {
-    txn_handle* handle;
+    VALIDATE_ARGC(3);
+    VALIDATE_TXN_HANDLE(handle, 0);
+    VALIDATE_UINT(flags, 2);
+    
     char name[256];
-    unsigned int flags;
-    MDB_dbi dbi;
-    
-    if (!enif_get_resource(env, argv[0], txn_resource_type, (void**)&handle) ||
-        !enif_get_uint(env, argv[2], &flags)) {
-        return enif_make_badarg(env);
-    }
-    
     const char* db_name = NULL;
+    
     if (!enif_is_atom(env, argv[1])) {
         if (!enif_get_string(env, argv[1], name, sizeof(name), ERL_NIF_LATIN1)) {
+            return enif_make_badarg(env);
+        }
+        // Validate name length
+        if (strlen(name) == 0 || strlen(name) >= sizeof(name) - 1) {
             return enif_make_badarg(env);
         }
         db_name = name;
     }
     
+    MDB_dbi dbi;
     int rc = mdb_dbi_open(handle->txn, db_name, flags, &dbi);
     if (rc != 0) {
         return make_mdb_error(env, rc);
@@ -323,27 +407,21 @@ static ERL_NIF_TERM nif_dbi_open(ErlNifEnv* env, int argc, const ERL_NIF_TERM ar
 }
 
 static ERL_NIF_TERM nif_dbi_close(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]) {
-    env_handle* handle;
-    unsigned int dbi;
-    
-    if (!enif_get_resource(env, argv[0], env_resource_type, (void**)&handle) ||
-        !enif_get_uint(env, argv[1], &dbi)) {
-        return enif_make_badarg(env);
-    }
+    VALIDATE_ARGC(2);
+    VALIDATE_ENV_HANDLE(handle, 0);
+    VALIDATE_UINT(dbi, 1);
     
     mdb_dbi_close(handle->env, dbi);
     return make_atom(env, "ok");
 }
 
 static ERL_NIF_TERM nif_dbi_stat(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]) {
-    txn_handle* handle;
-    unsigned int dbi;
-    MDB_stat stat;
+    VALIDATE_ARGC(2);
+    VALIDATE_TXN_HANDLE(handle, 0);
+    VALIDATE_UINT(dbi, 1);
     
-    if (!enif_get_resource(env, argv[0], txn_resource_type, (void**)&handle) ||
-        !enif_get_uint(env, argv[1], &dbi)) {
-        return enif_make_badarg(env);
-    }
+    MDB_stat stat;
+    memset(&stat, 0, sizeof(stat));
     
     int rc = mdb_stat(handle->txn, dbi, &stat);
     if (rc != 0) {
@@ -363,17 +441,21 @@ static ERL_NIF_TERM nif_dbi_stat(ErlNifEnv* env, int argc, const ERL_NIF_TERM ar
 }
 
 static ERL_NIF_TERM nif_get(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]) {
-    txn_handle* handle;
-    unsigned int dbi;
-    ErlNifBinary key_bin;
-    MDB_val key, data;
+    VALIDATE_ARGC(3);
+    VALIDATE_TXN_HANDLE(handle, 0);
+    VALIDATE_UINT(dbi, 1);
+    VALIDATE_BINARY(key_bin, 2);
     
-    if (!enif_get_resource(env, argv[0], txn_resource_type, (void**)&handle) ||
-        !enif_get_uint(env, argv[1], &dbi) ||
-        !enif_inspect_binary(env, argv[2], &key_bin)) {
+    // Validate key size (LMDB has limits)
+    if (key_bin.size == 0 || key_bin.size > 511) {
         return enif_make_badarg(env);
     }
     
+    if (!key_bin.data) {
+        return enif_make_badarg(env);
+    }
+    
+    MDB_val key, data;
     key.mv_size = key_bin.size;
     key.mv_data = key_bin.data;
     
@@ -384,28 +466,44 @@ static ERL_NIF_TERM nif_get(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
         return make_mdb_error(env, rc);
     }
     
+    if (!data.mv_data || data.mv_size == 0) {
+        ERL_NIF_TERM empty_binary;
+        enif_make_new_binary(env, 0, &empty_binary);
+        return enif_make_tuple2(env, make_atom(env, "ok"), empty_binary);
+    }
+    
     ERL_NIF_TERM data_term;
     unsigned char* data_ptr = enif_make_new_binary(env, data.mv_size, &data_term);
+    if (!data_ptr) {
+        return enif_make_badarg(env);
+    }
     memcpy(data_ptr, data.mv_data, data.mv_size);
     
     return enif_make_tuple2(env, make_atom(env, "ok"), data_term);
 }
 
 static ERL_NIF_TERM nif_put(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]) {
-    txn_handle* handle;
-    unsigned int dbi;
-    ErlNifBinary key_bin, data_bin;
-    unsigned int flags;
-    MDB_val key, data;
+    VALIDATE_ARGC(5);
+    VALIDATE_TXN_HANDLE(handle, 0);
+    VALIDATE_UINT(dbi, 1);
+    VALIDATE_BINARY(key_bin, 2);
+    VALIDATE_BINARY(data_bin, 3);
+    VALIDATE_UINT(flags, 4);
     
-    if (!enif_get_resource(env, argv[0], txn_resource_type, (void**)&handle) ||
-        !enif_get_uint(env, argv[1], &dbi) ||
-        !enif_inspect_binary(env, argv[2], &key_bin) ||
-        !enif_inspect_binary(env, argv[3], &data_bin) ||
-        !enif_get_uint(env, argv[4], &flags)) {
+    // Validate key and data sizes (LMDB has limits)
+    if (key_bin.size == 0 || key_bin.size > 511) {
         return enif_make_badarg(env);
     }
     
+    if (data_bin.size > 2147483647U) { // ~2GB limit
+        return enif_make_badarg(env);
+    }
+    
+    if (!key_bin.data || (!data_bin.data && data_bin.size > 0)) {
+        return enif_make_badarg(env);
+    }
+    
+    MDB_val key, data;
     key.mv_size = key_bin.size;
     key.mv_data = key_bin.data;
     data.mv_size = data_bin.size;
@@ -420,17 +518,20 @@ static ERL_NIF_TERM nif_put(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
 }
 
 static ERL_NIF_TERM nif_del(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]) {
-    txn_handle* handle;
-    unsigned int dbi;
-    ErlNifBinary key_bin;
-    MDB_val key, *data_ptr = NULL;
-    
-    if (!enif_get_resource(env, argv[0], txn_resource_type, (void**)&handle) ||
-        !enif_get_uint(env, argv[1], &dbi) ||
-        !enif_inspect_binary(env, argv[2], &key_bin)) {
+    if (argc != 3 && argc != 4) {
         return enif_make_badarg(env);
     }
     
+    VALIDATE_TXN_HANDLE(handle, 0);
+    VALIDATE_UINT(dbi, 1);
+    VALIDATE_BINARY(key_bin, 2);
+    
+    // Validate key size
+    if (key_bin.size == 0 || key_bin.size > 511 || !key_bin.data) {
+        return enif_make_badarg(env);
+    }
+    
+    MDB_val key, *data_ptr = NULL;
     key.mv_size = key_bin.size;
     key.mv_data = key_bin.data;
     
@@ -441,6 +542,11 @@ static ERL_NIF_TERM nif_del(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
         if (!enif_inspect_binary(env, argv[3], &data_bin)) {
             return enif_make_badarg(env);
         }
+        
+        if (data_bin.size > 2147483647U || (!data_bin.data && data_bin.size > 0)) {
+            return enif_make_badarg(env);
+        }
+        
         data.mv_size = data_bin.size;
         data.mv_data = data_bin.data;
         data_ptr = &data;
@@ -457,11 +563,11 @@ static ERL_NIF_TERM nif_del(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
 }
 
 static ERL_NIF_TERM nif_cursor_open(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]) {
-    txn_handle* handle;
-    unsigned int dbi;
+    VALIDATE_ARGC(2);
+    VALIDATE_TXN_HANDLE(handle, 0);
+    VALIDATE_UINT(dbi, 1);
     
-    if (!enif_get_resource(env, argv[0], txn_resource_type, (void**)&handle) ||
-        !enif_get_uint(env, argv[1], &dbi)) {
+    if (!cursor_resource_type) {
         return enif_make_badarg(env);
     }
     
@@ -470,8 +576,11 @@ static ERL_NIF_TERM nif_cursor_open(ErlNifEnv* env, int argc, const ERL_NIF_TERM
         return enif_make_badarg(env);
     }
     
+    // Initialize handle to safe state
+    cursor_handle_ptr->cursor = NULL;
+    
     int rc = mdb_cursor_open(handle->txn, dbi, &cursor_handle_ptr->cursor);
-    if (rc != 0) {
+    if (rc != 0 || !cursor_handle_ptr->cursor) {
         enif_release_resource(cursor_handle_ptr);
         return make_mdb_error(env, rc);
     }
@@ -482,9 +591,10 @@ static ERL_NIF_TERM nif_cursor_open(ErlNifEnv* env, int argc, const ERL_NIF_TERM
 }
 
 static ERL_NIF_TERM nif_cursor_close(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]) {
-    cursor_handle* handle;
+    VALIDATE_ARGC(1);
     
-    if (!enif_get_resource(env, argv[0], cursor_resource_type, (void**)&handle)) {
+    cursor_handle* handle;
+    if (!enif_get_resource(env, argv[0], cursor_resource_type, (void**)&handle) || !handle) {
         return enif_make_badarg(env);
     }
     
@@ -497,17 +607,17 @@ static ERL_NIF_TERM nif_cursor_close(ErlNifEnv* env, int argc, const ERL_NIF_TER
 }
 
 static ERL_NIF_TERM nif_cursor_get(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]) {
-    cursor_handle* handle;
-    ErlNifBinary key_bin;
-    unsigned int op;
-    MDB_val key, data;
+    VALIDATE_ARGC(3);
+    VALIDATE_CURSOR_HANDLE(handle, 0);
+    VALIDATE_BINARY(key_bin, 1);
+    VALIDATE_UINT(op, 2);
     
-    if (!enif_get_resource(env, argv[0], cursor_resource_type, (void**)&handle) ||
-        !enif_inspect_binary(env, argv[1], &key_bin) ||
-        !enif_get_uint(env, argv[2], &op)) {
+    // Validate key size for operations that use it
+    if (key_bin.size > 511 || (!key_bin.data && key_bin.size > 0)) {
         return enif_make_badarg(env);
     }
     
+    MDB_val key, data;
     key.mv_size = key_bin.size;
     key.mv_data = key_bin.data;
     
@@ -518,9 +628,18 @@ static ERL_NIF_TERM nif_cursor_get(ErlNifEnv* env, int argc, const ERL_NIF_TERM 
         return make_mdb_error(env, rc);
     }
     
+    // Validate returned data
+    if (!key.mv_data || !data.mv_data) {
+        return make_mdb_error(env, MDB_CORRUPTED);
+    }
+    
     ERL_NIF_TERM key_term, data_term;
     unsigned char* key_ptr = enif_make_new_binary(env, key.mv_size, &key_term);
     unsigned char* data_ptr = enif_make_new_binary(env, data.mv_size, &data_term);
+    
+    if (!key_ptr || !data_ptr) {
+        return enif_make_badarg(env);
+    }
     
     memcpy(key_ptr, key.mv_data, key.mv_size);
     memcpy(data_ptr, data.mv_data, data.mv_size);
@@ -529,18 +648,26 @@ static ERL_NIF_TERM nif_cursor_get(ErlNifEnv* env, int argc, const ERL_NIF_TERM 
 }
 
 static ERL_NIF_TERM nif_cursor_put(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]) {
-    cursor_handle* handle;
-    ErlNifBinary key_bin, data_bin;
-    unsigned int flags;
-    MDB_val key, data;
+    VALIDATE_ARGC(4);
+    VALIDATE_CURSOR_HANDLE(handle, 0);
+    VALIDATE_BINARY(key_bin, 1);
+    VALIDATE_BINARY(data_bin, 2);
+    VALIDATE_UINT(flags, 3);
     
-    if (!enif_get_resource(env, argv[0], cursor_resource_type, (void**)&handle) ||
-        !enif_inspect_binary(env, argv[1], &key_bin) ||
-        !enif_inspect_binary(env, argv[2], &data_bin) ||
-        !enif_get_uint(env, argv[3], &flags)) {
+    // Validate key and data sizes
+    if (key_bin.size == 0 || key_bin.size > 511) {
         return enif_make_badarg(env);
     }
     
+    if (data_bin.size > 2147483647U) {
+        return enif_make_badarg(env);
+    }
+    
+    if (!key_bin.data || (!data_bin.data && data_bin.size > 0)) {
+        return enif_make_badarg(env);
+    }
+    
+    MDB_val key, data;
     key.mv_size = key_bin.size;
     key.mv_data = key_bin.data;
     data.mv_size = data_bin.size;
@@ -555,13 +682,9 @@ static ERL_NIF_TERM nif_cursor_put(ErlNifEnv* env, int argc, const ERL_NIF_TERM 
 }
 
 static ERL_NIF_TERM nif_cursor_del(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]) {
-    cursor_handle* handle;
-    unsigned int flags;
-    
-    if (!enif_get_resource(env, argv[0], cursor_resource_type, (void**)&handle) ||
-        !enif_get_uint(env, argv[1], &flags)) {
-        return enif_make_badarg(env);
-    }
+    VALIDATE_ARGC(2);
+    VALIDATE_CURSOR_HANDLE(handle, 0);
+    VALIDATE_UINT(flags, 1);
     
     int rc = mdb_cursor_del(handle->cursor, flags);
     if (rc != 0) {
@@ -600,6 +723,10 @@ static ErlNifFunc nif_funcs[] = {
 };
 
 static int load(ErlNifEnv* env, void** priv_data, ERL_NIF_TERM load_info) {
+    if (!env) {
+        return -1;
+    }
+    
     env_resource_type = enif_open_resource_type(env, NULL, "env_resource",
                                                 env_resource_dtor,
                                                 ERL_NIF_RT_CREATE, NULL);
