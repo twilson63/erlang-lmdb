@@ -370,10 +370,13 @@ static ERL_NIF_TERM nif_txn_abort(ErlNifEnv* env, int argc, const ERL_NIF_TERM a
         return enif_make_badarg(env);
     }
     
-    if (handle->txn) {
-        mdb_txn_abort(handle->txn);
-        handle->txn = NULL;
+    // If transaction is already committed/aborted, this should fail
+    if (!handle->txn) {
+        return enif_make_badarg(env);
     }
+    
+    mdb_txn_abort(handle->txn);
+    handle->txn = NULL;
     
     return make_atom(env, "ok");
 }
