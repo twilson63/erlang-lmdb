@@ -186,10 +186,12 @@ static ERL_NIF_TERM nif_env_close(ErlNifEnv* env, int argc, const ERL_NIF_TERM a
         return enif_make_badarg(env);
     }
     
-    if (handle->env) {
-        mdb_env_close(handle->env);
-        handle->env = NULL;
+    if (!handle->env) {
+        return enif_make_badarg(env);
     }
+
+    mdb_env_close(handle->env);
+    handle->env = NULL;
     
     return make_atom(env, "ok");
 }
