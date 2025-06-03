@@ -18,7 +18,7 @@ run_all_tests() ->
     io:format("Running comprehensive segfault tests...~n"),
     
     % Clean up any existing test files
-    os:cmd("rm -rf test_segfault_*"),
+    os:cmd("rm -rf test/segfault_*"),
     
     test_invalid_handles(),
     test_parameter_validation(),
@@ -64,7 +64,7 @@ test_parameter_validation() ->
     
     % Test with valid environment
     ok = lmdb_nif:env_set_mapsize(Env, 1048576),
-    ok = lmdb_nif:env_open(Env, "test_segfault_param", ?MDB_CREATE bor ?MDB_NOSUBDIR),
+    ok = lmdb_nif:env_open(Env, "test/segfault_param", ?MDB_CREATE bor ?MDB_NOSUBDIR),
     
     {ok, Txn} = lmdb_nif:txn_begin(Env, undefined, 0),
     {ok, Dbi} = lmdb_nif:dbi_open(Txn, undefined, ?MDB_CREATE),
@@ -84,7 +84,7 @@ test_boundary_conditions() ->
     
     {ok, Env} = lmdb_nif:env_create(),
     ok = lmdb_nif:env_set_mapsize(Env, 1048576),
-    ok = lmdb_nif:env_open(Env, "test_segfault_boundary", ?MDB_CREATE bor ?MDB_NOSUBDIR),
+    ok = lmdb_nif:env_open(Env, "test/segfault_boundary", ?MDB_CREATE bor ?MDB_NOSUBDIR),
     
     {ok, Txn} = lmdb_nif:txn_begin(Env, undefined, 0),
     {ok, Dbi} = lmdb_nif:dbi_open(Txn, undefined, ?MDB_CREATE),
@@ -125,7 +125,7 @@ test_transaction_state() ->
     
     {ok, Env} = lmdb_nif:env_create(),
     ok = lmdb_nif:env_set_mapsize(Env, 1048576),
-    ok = lmdb_nif:env_open(Env, "test_segfault_txn", ?MDB_CREATE bor ?MDB_NOSUBDIR),
+    ok = lmdb_nif:env_open(Env, "test/segfault_txn", ?MDB_CREATE bor ?MDB_NOSUBDIR),
     
     {ok, Txn} = lmdb_nif:txn_begin(Env, undefined, 0),
     {ok, Dbi} = lmdb_nif:dbi_open(Txn, undefined, ?MDB_CREATE),
@@ -148,7 +148,7 @@ test_data_edge_cases() ->
     
     {ok, Env} = lmdb_nif:env_create(),
     ok = lmdb_nif:env_set_mapsize(Env, 1048576),
-    ok = lmdb_nif:env_open(Env, "test_segfault_data", ?MDB_CREATE bor ?MDB_NOSUBDIR),
+    ok = lmdb_nif:env_open(Env, "test/segfault_data", ?MDB_CREATE bor ?MDB_NOSUBDIR),
     
     {ok, Txn} = lmdb_nif:txn_begin(Env, undefined, 0),
     {ok, Dbi} = lmdb_nif:dbi_open(Txn, undefined, ?MDB_CREATE),

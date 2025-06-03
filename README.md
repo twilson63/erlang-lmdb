@@ -209,12 +209,7 @@ Common environment flags (can be combined with bitwise OR):
 Run the test suite:
 
 ```bash
-make test
-```
-
-Or with rebar3:
-```bash
-rebar3 eunit
+make test-full
 ```
 
 ## Building from Source

@@ -188,7 +188,7 @@ test: compile
 	erl -pa $(EBIN_DIR) -eval 'eunit:test([lmdb_nif_tests]), halt().' -noshell
 
 # Full test target (including segfault tests)
-test-full: compile
+test-full: test
 	erl -pa $(EBIN_DIR) -eval 'simple_segfault_test:run_tests(), halt().' -noshell
 	erl -pa $(EBIN_DIR) -eval 'comprehensive_segfault_test:run_all_tests(), halt().' -noshell
 	erl -pa $(EBIN_DIR) -eval 'final_segfault_validation:run_validation(), halt().' -noshell
