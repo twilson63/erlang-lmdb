@@ -48,7 +48,7 @@ test_parameter_types() ->
     % Test 2.1: Non-binary keys/values
     {ok, Env} = lmdb_nif:env_create(),
     ok = lmdb_nif:env_set_mapsize(Env, 1048576),
-    ok = lmdb_nif:env_open(Env, "final_test_param", ?MDB_CREATE bor ?MDB_NOSUBDIR),
+    ok = lmdb_nif:env_open(Env, "test/final_param", ?MDB_CREATE bor ?MDB_NOSUBDIR),
     {ok, Txn} = lmdb_nif:txn_begin(Env, undefined, 0),
     {ok, Dbi} = lmdb_nif:dbi_open(Txn, undefined, ?MDB_CREATE),
     
@@ -73,7 +73,7 @@ test_bounds_validation() ->
     
     % Test 3.2: Key/value size limits
     ok = lmdb_nif:env_set_mapsize(Env, 1048576),
-    ok = lmdb_nif:env_open(Env, "final_test_bounds", ?MDB_CREATE bor ?MDB_NOSUBDIR),
+    ok = lmdb_nif:env_open(Env, "test/final_bounds", ?MDB_CREATE bor ?MDB_NOSUBDIR),
     {ok, Txn} = lmdb_nif:txn_begin(Env, undefined, 0),
     {ok, Dbi} = lmdb_nif:dbi_open(Txn, undefined, ?MDB_CREATE),
     
@@ -92,7 +92,7 @@ test_state_consistency() ->
     % Test 4.1: Transaction state validation
     {ok, Env} = lmdb_nif:env_create(),
     ok = lmdb_nif:env_set_mapsize(Env, 1048576),
-    ok = lmdb_nif:env_open(Env, "final_test_state", ?MDB_CREATE bor ?MDB_NOSUBDIR),
+    ok = lmdb_nif:env_open(Env, "test/final_state", ?MDB_CREATE bor ?MDB_NOSUBDIR),
     {ok, Txn} = lmdb_nif:txn_begin(Env, undefined, 0),
     {ok, Dbi} = lmdb_nif:dbi_open(Txn, undefined, ?MDB_CREATE),
     
@@ -112,7 +112,7 @@ test_edge_cases() ->
     % Test 5.1: Maximum valid key size and special data
     {ok, Env} = lmdb_nif:env_create(),
     ok = lmdb_nif:env_set_mapsize(Env, 1048576),
-    ok = lmdb_nif:env_open(Env, "final_test_edge", ?MDB_CREATE bor ?MDB_NOSUBDIR),
+    ok = lmdb_nif:env_open(Env, "test/final_edge", ?MDB_CREATE bor ?MDB_NOSUBDIR),
     {ok, Txn} = lmdb_nif:txn_begin(Env, undefined, 0),
     {ok, Dbi} = lmdb_nif:dbi_open(Txn, undefined, ?MDB_CREATE),
     

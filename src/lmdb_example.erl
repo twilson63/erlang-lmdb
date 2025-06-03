@@ -276,9 +276,9 @@ performance_test(WriteOps, ReadOps, DBSize) ->
     {ok, Stats} =
         lmdb:with_ro_txn(
             Env,
-            fun(Txn) ->
-                {ok, Dbi} = lmdb:open_db(Txn, default),
-                lmdb_nif:dbi_stat(Txn, Dbi)
+            fun(Txn2) ->
+                {ok, Dbi} = lmdb:open_db(Txn2, default),
+                lmdb_nif:dbi_stat(Txn2, Dbi)
             end
         ),
     io:format("    Database statistics: ~p~n", [Stats]),

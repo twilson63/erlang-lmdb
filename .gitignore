@@ -1,3 +1,6 @@
 _build
-lmdb
+*.dump
+ebin/
+priv/
+lmdb/
 test/

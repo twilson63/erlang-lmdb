@@ -33,7 +33,7 @@ run_tests() ->
     
     % Test 4: Check committed transaction abort
     ok = lmdb_nif:env_set_mapsize(Env, 1048576),
-    ok = lmdb_nif:env_open(Env, "simple_test", ?MDB_CREATE bor ?MDB_NOSUBDIR),
+    ok = lmdb_nif:env_open(Env, "test/simple", ?MDB_CREATE bor ?MDB_NOSUBDIR),
     {ok, Txn} = lmdb_nif:txn_begin(Env, undefined, 0),
     ok = lmdb_nif:txn_commit(Txn),
     
@@ -58,7 +58,7 @@ run_tests() ->
     % Test 6: Invalid binary parameters  
     {ok, Env2} = lmdb_nif:env_create(),
     ok = lmdb_nif:env_set_mapsize(Env2, 1048576),
-    ok = lmdb_nif:env_open(Env2, "simple_test2", ?MDB_CREATE bor ?MDB_NOSUBDIR),
+    ok = lmdb_nif:env_open(Env2, "test/simple2", ?MDB_CREATE bor ?MDB_NOSUBDIR),
     {ok, Txn2} = lmdb_nif:txn_begin(Env2, undefined, 0),
     {ok, Dbi} = lmdb_nif:dbi_open(Txn2, undefined, ?MDB_CREATE),
     
