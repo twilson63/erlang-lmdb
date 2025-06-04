@@ -26,7 +26,7 @@
     put/3,
     put/4,
     put/5,
-    delete/3,
+    delete/2,
     delete/4,
     
     % Transaction operations
@@ -38,11 +38,13 @@
     write_batch/2,
     
     % Iteration
+    fold/3,
     fold/4,
     foreach/3,
     
     % Utilities
     exists/3,
+    count/1,
     count/2
 ]).
 
@@ -156,20 +158,25 @@ open_db(Txn, Name, Flags) when is_reference(Txn), ?IS_ATOM_OR_STRING(Name), ?IS_
     lmdb_nif:dbi_open(Txn, DbName, Flags);
 open_db(_, _, _) ->
     {error, {badargs, 
-        "Txn must be reference, Name, must be atom or string, and Flags, must be non negative integer"
+        <<"Txn must be reference, Name, must be atom or string, and Flags, must be non negative integer">>
     }}.
 
 %% @doc Close a database
--spec close_db(lmdb_env(), lmdb_dbi()) -> ok.
-close_db(Env, Dbi) ->
-    lmdb_nif:dbi_close(Env, Dbi).
+close_db(#{ env := Env, dbi := Dbi}) ->
+  close_db(Env, Dbi).
+close_db(Env, Dbi) when is_reference(Env) ->
+    lmdb_nif:dbi_close(Env, Dbi);
+close_db(_, _) -> 
+  {error, {badarg, <<"Env and Dbi required to close db">>}}.
 
 %% @doc Get a value by key
 get(Opts, Key) ->
     get(Opts, Key, [create]).
 get(Opts, Key, Flags) when is_list(Flags) ->
     get(Opts, Key, merge_flags(Flags));
-get(_Opts = #{ env := Env, name := Name}, Key, FlagsInt) when is_integer(FlagsInt) ->
+get(#{ env := Env, name := Name}, 
+    Key, FlagsInt)
+  when is_binary(Key),is_integer(FlagsInt) ->
     Res = 
         with_ro_txn(
             Env,
@@ -192,20 +199,23 @@ get(Txn, Dbi, Key) ->
     get(Txn, Dbi, term_to_binary(Key)).
 
 %% @doc Put a key-value pair with default flags
-put(Opts, Key, Value) ->
+put(Opts, Key, Value) when is_map(Opts) ->
     put(Opts, Key, Value, [create]).
-put(Opts, Key, Value, Flags) when is_list(Flags) ->
+put(Opts, Key, Value, Flags) 
+  when is_map(Opts), is_binary(Key), is_binary(Value), is_list(Flags) ->
     put(Opts, Key, Value, merge_flags(Flags));
-put(#{ env := Env, name := Name }, Key, Value, FlagsInt) when is_integer(FlagsInt) ->
+put(#{ env := Env, name := Name }, Key, Value, FlagsInt) 
+  when 
+    is_binary(Key),
+    is_binary(Value),
+    is_integer(FlagsInt) ->
     Res =
         with_txn(
             Env,
             fun(Txn) ->
                 case open_db(Txn, Name, FlagsInt) of
                     {ok, Dbi} ->
-                        ok = put(Txn, Dbi, Key, Value),
-                        ok = close_db(Env, Dbi),
-                        ok;
+                        put(Txn, Dbi, Key, Value);
                     Error ->
                         Error
                 end
@@ -228,20 +238,29 @@ put(Txn, Dbi, Key, Value, Flags) ->
     put(Txn, Dbi, BinKey, BinValue, Flags).
 
 %% @doc Delete a key
--spec delete(lmdb_txn(), lmdb_dbi(), binary()) -> ok | {error, term()}.
-delete(Txn, Dbi, Key) when is_binary(Key) ->
-    lmdb_nif:del(Txn, Dbi, Key);
-delete(Txn, Dbi, Key) ->
-    delete(Txn, Dbi, term_to_binary(Key)).
+delete(#{ env := Env, name := Name }, Key)  when is_binary(Key) ->
+  delete(Env, Name, Key, merge_flags([create])).
 
-%% @doc Delete a specific key-value pair
--spec delete(lmdb_txn(), lmdb_dbi(), binary(), binary()) -> ok | {error, term()}.
-delete(Txn, Dbi, Key, Value) when is_binary(Key), is_binary(Value) ->
-    lmdb_nif:del(Txn, Dbi, Key, Value);
-delete(Txn, Dbi, Key, Value) ->
-    BinKey = case is_binary(Key) of true -> Key; false -> term_to_binary(Key) end,
-    BinValue = case is_binary(Value) of true -> Value; false -> term_to_binary(Value) end,
-    delete(Txn, Dbi, BinKey, BinValue).
+delete(Env, Name, Key, FlagsInt) when is_binary(Key) ->
+    Res =
+        with_txn(
+            Env,
+            fun(Txn) ->
+                case open_db(Txn, Name, FlagsInt) of
+                    {ok, Dbi} ->
+                        lmdb_nif:del(Txn, Dbi, Key);
+                    Error ->
+                        Error
+                end
+            end
+        ),
+    case Res of
+        {ok, ok} -> ok;
+        Error -> Error
+    end.
+
+delete(Env, Name, Key) ->
+    delete(Env, Name, term_to_binary(Key), merge_flags([create])).
 
 %% @doc Execute a function within a read-write transaction
 -spec with_txn(lmdb_env(), fun((lmdb_txn()) -> Result)) -> {ok, Result} | {error, term()}.
@@ -301,26 +320,21 @@ write_batch(Env, Operations) ->
     end).
 
 %% @doc Fold over all key-value pairs in a database
--spec fold(
-  lmdb_env(), 
-  atom() | string(), 
-  fun((binary(), binary(), Acc) -> Acc), 
-  Acc
-) -> {ok, Acc} | {error, term()}.
+fold(#{ env := Env, name := Name}, Fun, Acc0) ->
+  fold(Env, Name, Fun, Acc0).
 fold(Env, Name, Fun, Acc0) ->
-    {ok, Dbi} = with_txn(Env, 
-      fun(Txn) -> 
-        {ok, Dbi} = open_db(Txn, Name), 
-        Dbi 
-      end
-    ),
     with_ro_txn(Env, fun(Txn) ->
-        case lmdb_nif:cursor_open(Txn, Dbi) of
-            {ok, Cursor} ->
-                try
-                    fold_cursor(Cursor, Fun, Acc0, first)
-                after
-                    lmdb_nif:cursor_close(Cursor)
+        case open_db(Txn, Name, ?MDB_CREATE) of
+            {ok, Dbi} ->
+                case lmdb_nif:cursor_open(Txn, Dbi) of
+                    {ok, Cursor} ->
+                        try
+                            fold_cursor(Cursor, Fun, Acc0, first)
+                        after
+                            lmdb_nif:cursor_close(Cursor)
+                        end;
+                    Error ->
+                        throw(Error)
                 end;
             Error ->
                 throw(Error)
@@ -345,12 +359,18 @@ exists(Txn, Dbi, Key) ->
     end.
 
 %% @doc Count the number of entries in a database
--spec count(lmdb_env(), lmdb_dbi()) -> {ok, non_neg_integer()} | {error, term()}.
-count(Env, Dbi) ->
+count(#{ env := Env, name := Name}) ->
+  count(Env, Name).
+count(Env, Name) ->
     with_ro_txn(Env, fun(Txn) ->
-        case lmdb_nif:dbi_stat(Txn, Dbi) of
-            {ok, Stats} ->
-                proplists:get_value(entries, Stats, 0);
+        case open_db(Txn, Name, ?MDB_CREATE) of
+            {ok, Dbi} ->
+                case lmdb_nif:dbi_stat(Txn, Dbi) of
+                    {ok, Stats} ->
+                        proplists:get_value(entries, Stats, 0);
+                    Error ->
+                        throw(Error)
+                end;
             Error ->
                 throw(Error)
         end

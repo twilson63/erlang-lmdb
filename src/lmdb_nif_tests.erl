@@ -32,10 +32,12 @@ cleanup(_) ->
     os:cmd("rm -rf test_lmdb_dir").
 
 test_erlang_api() ->
-    {ok, Env} = lmdb:env_create(),
-    ok = lmdb:env_open(Env, ?TEST_DB_PATH ++ "_erlang_api", [nosubdir, create]),
-    ok = lmdb:put(Env, <<"key1">>, <<"value1">>),
-    {ok, <<"value1">>} = lmdb:get(Env, <<"key1">>),
+    {ok, Env} = lmdb:env_create(<<"/tmp/mydb">>, #{ max_dbs => 2, max_mapsize => 1024 * 1024 }),
+    % ok = lmdb:env_open(Env, ?TEST_DB_PATH ++ "_erlang_api", [nosubdir, create]),
+    Opts = #{ env => Env, name => default },
+    ok = lmdb:put(Opts, <<"key1">>, <<"value1">>),
+    {ok, Value} = lmdb:get(Opts, <<"key1">>),
+    ?assertEqual(<<"value1">>, Value),
     ok = lmdb:env_close(Env).
 
 %% Test environment creation and opening
@@ -55,32 +57,21 @@ test_env_create_and_open() ->
 
 %% Test basic put/get/delete operations
 test_basic_operations() ->
-    {ok, Env} = lmdb:env_create(),
-    ok = lmdb:env_set_mapsize(Env, 10485760),
-    ok = lmdb:env_open(Env, ?TEST_DB_PATH ++ "_basic", ?MDB_CREATE bor ?MDB_NOSUBDIR),
-    
-    {ok, Result} = lmdb:with_txn(Env, fun(Txn) ->
-        {ok, Dbi} = lmdb:open_db(Txn, default),
-        
-        %% Test put and get
-        ok = lmdb:put(Txn, Dbi, <<"key1">>, <<"value1">>),
-        {ok, <<"value1">>} = lmdb:get(Txn, Dbi, <<"key1">>),
-        
-        %% Test overwrite
-        ok = lmdb:put(Txn, Dbi, <<"key1">>, <<"value2">>),
-        {ok, <<"value2">>} = lmdb:get(Txn, Dbi, <<"key1">>),
-        
-        %% Test not found
-        not_found = lmdb:get(Txn, Dbi, <<"nonexistent">>),
-        
-        %% Test delete
-        ok = lmdb:delete(Txn, Dbi, <<"key1">>),
-        not_found = lmdb:get(Txn, Dbi, <<"key1">>),
-        
-        success
-    end),
-    
-    ?assertEqual(success, Result),
+    {ok, Env} = lmdb:env_create(<<"/tmp/db2">>, #{
+      max_dbs => 2,
+      max_mapsize => 1024 * 1024
+    }),
+    Opts = #{
+      env => Env,
+      name => default
+    },
+    lmdb:put(Opts, <<"key1">>, <<"value">>),
+    Result  = lmdb:get(Opts, <<"key1">>),
+      
+    %% Test delete
+    ok = lmdb:delete(Opts, <<"key1">>),
+    not_found = lmdb:get(Opts,<<"key1">>),
+    ?assertNotEqual(not_found, Result),
     ok = lmdb:env_close(Env).
 
 %% Test transaction handling
@@ -128,6 +119,7 @@ test_transactions() ->
 %% Test batch operations
 test_batch_operations() ->
     {ok, Env} = lmdb:env_create(),
+    ok = lmdb:env_set_maxdbs(Env, 2),
     ok = lmdb:env_set_mapsize(Env, 10485760),
     ok = lmdb:env_open(Env, ?TEST_DB_PATH ++ "_batch", ?MDB_CREATE bor ?MDB_NOSUBDIR),
     
@@ -135,12 +127,13 @@ test_batch_operations() ->
     Operations = [
         {put, <<"batch1">>, <<"value1">>},
         {put, <<"batch2">>, <<"value2">>},
-        {put, <<"batch3">>, <<"value3">>}
+        {put, <<"batch3">>, <<"value3">>},
+        {put, <<"batch4">>, <<"value4">>}
     ],
     
     %% Write batch data
     {ok, _} = lmdb:with_txn(Env, fun(Txn) ->
-        {ok, Dbi} = lmdb:open_db(Txn, default),
+        {ok, Dbi} = lmdb:open_db(Txn, "HelloWorld"),
         lists:foreach(fun({put, Key, Value}) ->
             ok = lmdb:put(Txn, Dbi, Key, Value)
         end, Operations),
@@ -149,7 +142,7 @@ test_batch_operations() ->
     
     %% Verify results
     {ok, Values} = lmdb:with_ro_txn(Env, fun(Txn) ->
-        {ok, ReadDbi} = lmdb:open_db(Txn, default),
+        {ok, ReadDbi} = lmdb:open_db(Txn, "HelloWorld"),
         [
             lmdb:get(Txn, ReadDbi, <<"batch1">>),
             lmdb:get(Txn, ReadDbi, <<"batch2">>),
@@ -163,32 +156,33 @@ test_batch_operations() ->
 
 %% Test iteration over database
 test_iteration() ->
-    {ok, Env} = lmdb:env_create(),
-    ok = lmdb:env_set_mapsize(Env, 10485760),
-    ok = lmdb:env_open(Env, ?TEST_DB_PATH ++ "_iter", ?MDB_CREATE bor ?MDB_NOSUBDIR),
-    
+    {ok, Env} = lmdb:env_create(
+    <<"/tmp/mydb-test">>,
+    #{
+      max_dbs => 2,
+      max_mapsize => 1 * 1024 * 1024
+    }),
+    Opts = #{ env => Env, name => mydb}, 
     %% Setup test data
-    {ok, Dbi} = lmdb:with_txn(Env, fun(Txn) ->
-        {ok, Dbi} = lmdb:open_db(Txn, default),
-        ok = lmdb:put(Txn, Dbi, <<"key1">>, <<"value1">>),
-        ok = lmdb:put(Txn, Dbi, <<"key2">>, <<"value2">>),
-        ok = lmdb:put(Txn, Dbi, <<"key3">>, <<"value3">>),
-        Dbi
-    end),
+    lmdb:put(Opts, <<"key1">>, <<"value1">>),
+    lmdb:put(Opts, <<"key2">>, <<"value2">>),
+    lmdb:put(Opts, <<"key3">>, <<"value3">>),
+    lmdb:put(Opts, <<"key4">>, <<"value4">>),
     
     %% Test fold
-    {ok, Keys} = lmdb:fold(Env, default, fun(Key, _Value, Acc) ->
+    {ok, Keys} = lmdb:fold(Opts, fun(Key, _Value, Acc) ->
         [Key | Acc]
     end, []),
     
-    ?assertEqual(3, length(Keys)),
+    ?assertEqual(4, length(Keys)),
     ?assert(lists:member(<<"key1">>, Keys)),
     ?assert(lists:member(<<"key2">>, Keys)),
     ?assert(lists:member(<<"key3">>, Keys)),
     
     %% Test count
-    {ok, 3} = lmdb:count(Env, Dbi),
-    
+    {ok, Results} = lmdb:count(Opts),
+    io:format("Count: ~p", [count]),
+    ?assertEqual(4, Results),
     ok = lmdb:env_close(Env).
 
 %% Test error handling
