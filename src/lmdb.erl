@@ -71,7 +71,8 @@ env_create(Path, Opts) when is_map(Opts) ->
         ok ?= env_set_mapsize(Env, maps:get(max_mapsize, Opts, ?DEFAULT_MAPSIZE)),
         ok ?= env_set_maxreaders(Env, maps:get(max_readers, Opts, ?DEFAULT_MAXREADERS)),
         ok ?= env_set_maxdbs(Env, maps:get(max_dbs, Opts, ?DEFAULT_MAXDBS)),
-        ok ?= env_open(Env, Path, maps:get(flags, Opts, [create])),
+        Flags = maps:get(flags, Opts, [create]),
+        ok ?= env_open(Env, Path, Flags),
         {ok, Env}
     end;
 env_create(_Path, _) ->

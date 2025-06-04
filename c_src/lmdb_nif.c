@@ -170,7 +170,7 @@ static ERL_NIF_TERM nif_env_open(ErlNifEnv* env, int argc, const ERL_NIF_TERM ar
         return enif_make_badarg(env);
     }
     
-    int rc = mdb_env_open(handle->env, path, flags | MDB_NOTLS, 0664);
+    int rc = mdb_env_open(handle->env, path, flags, 0664);
     if (rc != 0) {
         return make_mdb_error(env, rc);
     }
