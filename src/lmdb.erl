@@ -196,7 +196,7 @@ get(#{ env := Env, name := Name},
         {ok, Value} -> Value;
         Error -> Error
     end;
-get(Txn, Dbi, Key) when is_reference(Txn),is_reference(Dbi),is_binary(Key) ->
+get(Txn, Dbi, Key) when is_reference(Txn),is_integer(Dbi),is_binary(Key) ->
     lmdb_nif:get(Txn, Dbi, Key);
 get(Txn, Dbi, Key) ->
     get(Txn, Dbi, term_to_binary(Key)).

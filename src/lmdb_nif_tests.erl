@@ -34,7 +34,7 @@ cleanup(_) ->
 test_erlang_api() ->
     {ok, Env} = lmdb:env_create(<<"/tmp/mydb">>, #{ max_dbs => 2, max_mapsize => 1024 * 1024 }),
     % ok = lmdb:env_open(Env, ?TEST_DB_PATH ++ "_erlang_api", [nosubdir, create]),
-    Opts = #{ env => Env, name => default },
+    Opts = #{env => Env, name => default_abc},
     ok = lmdb:put(Opts, <<"key1">>, <<"value1">>),
     {ok, Value} = lmdb:get(Opts, <<"key1">>),
     ?assertEqual(<<"value1">>, Value),
@@ -57,14 +57,8 @@ test_env_create_and_open() ->
 
 %% Test basic put/get/delete operations
 test_basic_operations() ->
-    {ok, Env} = lmdb:env_create(<<"/tmp/db2">>, #{
-      max_dbs => 2,
-      max_mapsize => 1024 * 1024
-    }),
-    Opts = #{
-      env => Env,
-      name => default
-    },
+    {ok, Env} = lmdb:env_create(<<"/tmp/db2">>, #{max_dbs => 2, max_mapsize => 1024 * 1024}),
+    Opts = #{env => Env, name => default_abc},
     lmdb:put(Opts, <<"key1">>, <<"value">>),
     Result  = lmdb:get(Opts, <<"key1">>),
       
@@ -189,8 +183,9 @@ test_iteration() ->
 test_error_handling() ->
     {ok, Env} = lmdb:env_create(),
     ok = lmdb:env_set_mapsize(Env, 10485760),
+    ok = lmdb:env_set_maxdbs(Env, 2),
     ok = lmdb:env_open(Env, ?TEST_DB_PATH ++ "_error", ?MDB_CREATE bor ?MDB_NOSUBDIR),
-    
+
     %% Test duplicate key with NOOVERWRITE flag
     {ok, Result} = lmdb:with_txn(Env, fun(Txn) ->
         {ok, Dbi} = lmdb:open_db(Txn, default),
