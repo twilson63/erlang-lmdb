@@ -171,9 +171,11 @@ close_db(_, _) ->
   {error, {badarg, <<"Env and Dbi required to close db">>}}.
 
 %% @doc Get a value by key
-get(Opts, Key) ->
-    get(Opts, Key, [create]).
-get(Opts, Key, Flags) when is_list(Flags) ->
+get(Opts, Key) when is_map(Opts),is_binary(Key) ->
+    get(Opts, Key, [create]);
+get(_,_) ->
+  {error, { badarg, <<"Get requires #{ env, name } and Key">> }}.
+get(Opts, Key, Flags) when is_map(Opts),is_binary(Key),is_list(Flags) ->
     get(Opts, Key, merge_flags(Flags));
 get(#{ env := Env, name := Name}, 
     Key, FlagsInt)
@@ -194,7 +196,7 @@ get(#{ env := Env, name := Name},
         {ok, Value} -> Value;
         Error -> Error
     end;
-get(Txn, Dbi, Key) when is_binary(Key) ->
+get(Txn, Dbi, Key) when is_reference(Txn),is_reference(Dbi),is_binary(Key) ->
     lmdb_nif:get(Txn, Dbi, Key);
 get(Txn, Dbi, Key) ->
     get(Txn, Dbi, term_to_binary(Key)).
